@@ -1,4 +1,4 @@
-// components/DetailModal.tsx
+// components/detailmodal.tsx
 import React from "react"
 
 interface CheckItem {
@@ -28,6 +28,7 @@ interface ModalData {
     shift: string
     waktuCheck?: string
     standard?: string
+    method?: string
   }
   result: CheckResult
 }

@@ -16,20 +16,25 @@ export default function LoginPage() {
   const router = useRouter()
   const { login } = useAuth()
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError("")
     setLoading(true)
 
-    const result = login(username, password)
-    if (result.success) {
-      router.push("/home")
-    } else {
-      setError(result.error || "Login gagal!")
+    try {
+      const result = await login(username, password) // ✅ await di sini
+      if (result.success) {
+        router.push("/home")
+      } else {
+        setError(result.error || "Login gagal!")
+      }
+    } catch (err) {
+      setError("Terjadi kesalahan saat login")
+    } finally {
+      setLoading(false)
     }
-
-    setLoading(false)
   }
+
 
   return (
     <>

@@ -55,19 +55,13 @@ export function Sidebar({ userName = "User", userRole = "Role" }: SidebarProps) 
     if (role.includes("inspector-ga") || role === "ga") return "/home";
     if (role.includes("inspector-qa") || role === "qa") return "/home";
     if (role.includes("group-leader-qa") || role === "qa") return "/home";
-    if (role.includes("inspector-produksi") || role === "produksi") return "/produksi-home";
-    if (role.includes("manager") || role === "manager") return "/manager-home";
-    if (role.includes("admin") || role === "admin") return "/admin-home";
     return "/home";
   };
 
   const getDashboardRoute = () => {
     const role = currentRole.toLowerCase();
     if (role.includes("inspector-ga") || role === "ga") return "/ga-dashboard";
-    if (role.includes("inspector-qa") || role === "qa") return "/qa-dashboard";
-    if (role.includes("inspector-produksi") || role === "produksi") return "/produksi-dashboard";
-    if (role.includes("manager") || role === "manager") return "/manager-dashboard";
-    if (role.includes("admin") || role === "admin") return "/admin-dashboard";
+    if (role.includes("inspector-qa") || role === "group-leader-qa") return "/qa-dashboard";
     return "/dashboard";
   };
 

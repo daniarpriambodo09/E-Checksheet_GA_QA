@@ -1,4 +1,4 @@
-// /app/cs-remove-control/page.tsx
+// /app/cs-remove-tool/page.tsx
 
 "use client"
 
@@ -9,6 +9,7 @@ import { NavbarStatic } from "@/components/navbar-static"
 import { DetailModal } from "@/components/ui/detailmodal"
 import Link from "next/link"
 import React from "react"
+import { Sidebar } from "@/components/Sidebar"
 
 interface CheckItem {
   id: string
@@ -34,10 +35,11 @@ interface CheckResult {
 
 export default function CSRemoveControlPage() {
   const router = useRouter()
-  const { user } = useAuth()
+  const { user, loading } = useAuth()
 
   useEffect(() => {
-    if (!user) {
+    if (loading) return
+    if (!user || (user.role !== "group-leader-qa" && user.role !== "inspector-qa")) {
       router.push("/login-page")
     }
   }, [user, router])
@@ -317,9 +319,16 @@ export default function CSRemoveControlPage() {
 
   return (
     <div className="app-page">
-      <NavbarStatic userName={user.fullName} />
+      <Sidebar userName={user.fullName} />
 
-      <div className="page-content">
+      <div 
+        className="page-content"
+        style={{
+          paddingLeft: "95px",
+          paddingRight: "25px",
+          paddingTop: "25px",
+          paddingBottom: "25px",
+        }}>
         <div className="header">
           <h1>Check Sheet Control Remove Tool</h1>
           <div className="user-info">

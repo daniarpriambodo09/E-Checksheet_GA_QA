@@ -27,9 +27,9 @@ export default function SignupPage() {
   // 🔹 Auto-set department berdasarkan role (dengan nilai yang sesuai auth context)
   useEffect(() => {
     if (formData.role === "inspector-ga") {
-      setFormData(prev => ({ ...prev, department: "ga" })) // ✅ "ga" bukan "general-affairs"
+      setFormData(prev => ({ ...prev, department: "general-affairs" })) // ✅ "ga" bukan "general-affairs"
     } else if (formData.role === "group-leader-qa" || formData.role === "inspector-qa") {
-      setFormData(prev => ({ ...prev, department: "qa" })) // ✅ "qa" bukan "quality-assurance"
+      setFormData(prev => ({ ...prev, department: "quality-assurance" })) // ✅ "qa" bukan "quality-assurance"
     }
   }, [formData.role])
 
@@ -41,19 +41,20 @@ export default function SignupPage() {
     }))
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    setError("")
-    setLoading(true)
+const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault()
+  setError("")
+  setLoading(true)
 
-    // Validasi role
-    if (!formData.role || !['group-leader-qa', 'inspector-qa', 'inspector-ga'].includes(formData.role)) {
-      setError("Pilih role terlebih dahulu!")
-      setLoading(false)
-      return
-    }
+  // Validasi role
+  if (!formData.role || !['group-leader-qa', 'inspector-qa', 'inspector-ga'].includes(formData.role)) {
+    setError("Pilih role terlebih dahulu!")
+    setLoading(false)
+    return
+  }
 
-    const result = signup({
+  try {
+    const result = await signup({
       username: formData.username,
       fullName: formData.fullName,
       nik: formData.nik,
@@ -62,15 +63,19 @@ export default function SignupPage() {
       password: formData.password,
       confirmPassword: formData.confirmPassword,
     })
+
     if (result.success) {
       alert("Pendaftaran berhasil! Silakan login.")
       router.push("/login-page")
     } else {
       setError(result.error || "Pendaftaran gagal!")
     }
-
+  } catch (err) {
+    setError("Terjadi kesalahan saat pendaftaran")
+  } finally {
     setLoading(false)
   }
+}
 
   return (
     <>
@@ -154,8 +159,8 @@ export default function SignupPage() {
                       required
                     >
                       <option value="">Pilih Departemen</option>
-                      <option value="ga">General Affairs (GA)</option>
-                      <option value="qa">Quality Assurance (QA)</option>
+                      <option value="general-affairs">General Affairs (GA)</option>
+                      <option value="quality-assurance">Quality Assurance (QA)</option>
                     </select>
                   </div>
                 </div>

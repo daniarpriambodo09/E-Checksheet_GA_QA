@@ -7,6 +7,7 @@ import { NavbarStatic } from "@/components/navbar-static"
 import { DetailModal } from "@/components/ui/detailmodal"
 import React from "react"
 import Link from "next/link"
+import { Sidebar } from "@/components/Sidebar"
 
 interface CheckPoint {
   id: number
@@ -47,6 +48,9 @@ export default function PressureJigPreAssyStatusPage() {
     }
   }, [user, router, redirected])
 
+  const currentMonth = new Date().getMonth()
+  const currentYear = new Date().getFullYear()
+
   // 🔹 Data Pressure Jig (7 item × 2 shift)
   const checkpoints = useMemo<CheckPoint[]>(() => [
     { id: 1, checkPoint: "Apakah pressure jig diletakkan sesuai dengan tempatnya.", shift: "A", frequency: "1x /Hari", judge: "O/X" },
@@ -64,6 +68,9 @@ export default function PressureJigPreAssyStatusPage() {
     { id: 7, checkPoint: "Apakah tekanan dari contact pressure jig masih dalam skala rata-rata.", shift: "A", frequency: "1x /Bulan", judge: "" },
     { id: 7.1, checkPoint: "Apakah tekanan dari contact pressure jig masih dalam skala rata-rata.", shift: "B", frequency: "1x /Bulan", judge: "" },
   ], [])
+
+  const [activeMonth, setActiveMonth] = useState(() => new Date().getMonth())
+  const [activeYear, setActiveYear] = useState(() => new Date().getFullYear())
 
   const storageKey = `preAssyPressureJigInspectorDailyCheckResults`
   const [results, setResults] = useState<Record<string, Record<string, CheckResult>>>(() => {
@@ -90,40 +97,158 @@ export default function PressureJigPreAssyStatusPage() {
   const januaryDates = useMemo(() => Array.from({ length: 31 }, (_, i) => i + 1), [])
   const today = new Date().getDate()
 
-  const getResult = (date: number, checkpointId: number, shift: "A" | "B") => {
-    const dateKey = `2026-01-${String(date).padStart(2, "0")}`
-    const checkpointKey = `${checkpointId}-${shift}`
-    return results[dateKey]?.[checkpointKey] || null
+  const getDateKey = (date: number): string => {
+    return `${activeYear}-${String(activeMonth + 1).padStart(2, '0')}-${String(date).padStart(2, '0')}`
   }
 
-  const [modalData, setModalData] = useState<{ date: number; checkpoint: CheckPoint; result: CheckResult } | null>(null)
+  const getResult = (date: number, id: number, shift: "A" | "B", timeSlot?: string) => {
+    const dateKey = getDateKey(date)
+    const key = timeSlot ? `${id}-${shift}-${timeSlot}` : `${id}-${shift}`
+    return results[dateKey]?.[key] || null
+  }
 
-  const renderStatusCell = (date: number, checkpoint: CheckPoint) => {
-    const result = getResult(date, checkpoint.id, checkpoint.shift)
-    if (result) {
+  const handleStatusChange = (
+    date: number,
+    id: number,
+    shift: "A" | "B",
+    newStatus: "OK" | "NG" | "-",
+    timeSlot?: string
+  ) => {
+    const dateKey = getDateKey(date)
+    const itemKey = timeSlot ? `${id}-${shift}-${timeSlot}` : `${id}-${shift}`
+    // DEEP CLONE untuk menghindari reference issues
+    const newResults = JSON.parse(JSON.stringify(results))
+
+    if (newStatus === "-") {
+      // Hapus entry jika status diubah menjadi "-"
+      if (newResults[dateKey]?.[itemKey]) {
+        delete newResults[dateKey][itemKey]
+        if (Object.keys(newResults[dateKey]).length === 0) {
+          delete newResults[dateKey]
+        }
+      }
+    } else if (newStatus === "NG") {
+      // Update atau tambah entry NG
+      const existing = newResults[dateKey]?.[itemKey]
+      
+      newResults[dateKey] = newResults[dateKey] || {}
+      newResults[dateKey][itemKey] = {
+        status: "NG",
+        ngCount: 1,
+        items: existing?.items || [],
+        notes: existing?.notes || "  ",
+        submittedAt: new Date().toISOString(),
+        submittedBy: user?.fullName || "Unknown",
+        ngDescription: existing?.ngDescription || "  ",
+        ngDepartment: existing?.ngDepartment || "QA"
+      }
+      
+      // Buka modal NG untuk edit notes
+      setNgModal({
+        date,
+        checkpoint: { id, shift },
+        shift,
+        notes: existing?.ngDescription || "  ",
+        department: existing?.ngDepartment || "QA"
+      })
+    } else {
+      // Update atau tambah entry OK
+      const existing = newResults[dateKey]?.[itemKey]
+      
+      newResults[dateKey] = newResults[dateKey] || {}
+      newResults[dateKey][itemKey] = {
+        status: "OK",
+        ngCount: 0,
+        items: existing?.items || [],
+        notes: existing?.notes || "  ",
+        submittedAt: new Date().toISOString(),
+        submittedBy: user?.fullName || "Unknown",
+        ngDescription: existing?.ngDescription || "  ",
+        ngDepartment: existing?.ngDepartment || "QA"
+      }
+    }
+
+    // Update state dan localStorage
+    setResults(newResults)
+    if (typeof window !== "undefined") {
+      localStorage.setItem(storageKey, JSON.stringify(newResults))
+    }
+  }
+
+  const saveNgReport = () => {
+    if (!ngModal) return
+    const { date, weekIndex, dayIndex, checkpoint, shift, notes, department } = ngModal
+    let dateKey = ""
+
+    if (!dateKey) return
+
+    const itemKey = `${checkpoint.id}-${shift}`
+    const newResults = JSON.parse(JSON.stringify(results))
+
+    newResults[dateKey] = newResults[dateKey] || {}
+    newResults[dateKey][itemKey] = {
+      ...newResults[dateKey][itemKey],
+      ngDescription: notes,
+      ngDepartment: department
+    }
+
+    setResults(newResults)
+    if (typeof window !== "undefined") {
+      localStorage.setItem(storageKey, JSON.stringify(newResults))
+    }
+    setNgModal(null)
+  }
+
+  const [ngModal, setNgModal] = useState<{
+    date?: number
+    weekIndex?: number
+    dayIndex?: number
+    checkpoint: any
+    shift: "A" | "B"
+    notes: string
+    department: string
+  } | null>(null)
+
+  const departments = ["QA", "Produksi", "Maintenance", "Logistik", "Engineering"]
+
+  const [modalData, setModalData] = useState<{ date: number; checkpoint: CheckPoint; result: CheckResult } | null>(null)
+  
+  const isCurrentMonth = activeMonth === currentMonth && activeYear === currentYear
+
+  const renderStatusCell = (date: number, checkpoint: any, timeSlot?: string) => {
+    const id = checkpoint.id
+    const shift = checkpoint.shift
+    const result = getResult(date, id, shift, timeSlot)
+    // Jika sudah ada hasil ATAU hari ini (untuk input baru), tampilkan dropdown yang editable
+    if (result || (isCurrentMonth && date === today)) {
+      const currentStatus = result?.status || 
+        results[getDateKey(date)]?.[timeSlot ? `${id}-${shift}-${timeSlot}` : `${id}-${shift}`]?.status || "-"
+      
+      const getBgColor = (status: string) => {
+        if (status === "OK") return "#4caf50"
+        if (status === "NG") return "#f44336"
+        return "#9e9e9e"
+      }
+      
       return (
-        <span
-          className={`status-badge ${result.status === "OK" ? "status-badge-ok" : "status-badge-ng"} text-xs px-1 py-0.5 rounded cursor-pointer inline-block`}
-          onClick={() => setModalData({ date, checkpoint, result })}
+        <select
+          className="status-dropdown"
+          style={{
+            backgroundColor: getBgColor(currentStatus),
+            color: "white"
+          }}
+          value={currentStatus}
+          onChange={(e) => handleStatusChange(date, id, shift, e.target.value as "OK" | "NG" | "-",  timeSlot)}
         >
-          {result.status === "OK" ? "OK" : `NG (${result.ngCount})`}
-        </span>
+          <option value="-">-</option>
+          <option value="OK">✓ OK</option>
+          <option value="NG">✗ NG</option>
+        </select>
       )
     }
-    if (date === today) {
-      const dateStr = `2026-01-${String(date).padStart(2, "0")}`
-      return (
-        <Link
-          href={`/e-checksheet?id=${checkpoint.id}&shift=${checkpoint.shift}&date=${dateStr}&mainType=pre-assy-pressure-jig&subType=inspector`}
-          className="block w-full h-full"
-        >
-          <span className="status-badge status-badge-check text-xs px-1 py-0.5 rounded cursor-pointer flex items-center justify-center w-full h-full">
-            CHECK
-          </span>
-        </Link>
-      )
-    }
-    return null
+
+    // Untuk tanggal yang tidak perlu dicek
+    return "-"
   }
 
   const title = "Daily Check Pressure Jig Inspector Pre Assy"
@@ -132,10 +257,12 @@ export default function PressureJigPreAssyStatusPage() {
 
   return (
     <div className="app-page">
-      <NavbarStatic userName={user.fullName} />
+      <Sidebar userName={user.fullName} />
 
       <div className="page-content">
-        <div className="header">
+        <div style={{
+          textAlign : "center"
+        }} className="header">
           <h1>{title}</h1>
           <p className="subtitle">Hanya untuk Inspector – Data tersimpan otomatis per shift.</p>
         </div>
@@ -151,7 +278,7 @@ export default function PressureJigPreAssyStatusPage() {
                   </th>
                 </tr>
                 <tr>
-                  <th className="col-no">#</th>
+                  <th className="col-no">No</th>
                   <th className="col-checkpoint">Item Check</th>
                   <th className="col-freq">Freq</th>
                   <th className="col-judge">Judge</th>
@@ -200,6 +327,39 @@ export default function PressureJigPreAssyStatusPage() {
 
         {modalData && <DetailModal data={modalData} onClose={() => setModalData(null)} />}
       </div>
+      
+      {/* === MODAL NG === */}
+      {ngModal && (
+        <div className="ng-modal-overlay">
+          <div className="ng-modal">
+            <h3>Edit Laporan Kondisi NG</h3>
+            <div className="ng-form-group">
+              <label>Keterangan NG:</label>
+              <textarea
+                value={ngModal.notes}
+                onChange={(e) => setNgModal({ ...ngModal, notes: e.target.value })}
+                rows={3}
+                placeholder="Deskripsikan kondisi NG..."
+              />
+            </div>
+            <div className="ng-form-group">
+              <label>Departemen Tujuan:</label>
+              <select
+                value={ngModal.department}
+                onChange={(e) => setNgModal({ ...ngModal, department: e.target.value })}
+              >
+                {departments.map(dept => (
+                  <option key={dept} value={dept}>{dept}</option>
+                ))}
+              </select>
+            </div>
+            <div className="ng-modal-actions">
+              <button onClick={() => setNgModal(null)}>Batal</button>
+              <button onClick={saveNgReport} className="btn-primary">Simpan</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <style jsx>{`
         .header {
@@ -239,7 +399,7 @@ export default function PressureJigPreAssyStatusPage() {
         .status-table th,
         .status-table td {
           padding: 10px 6px;
-          text-align: left;
+          text-align: center;
           border: 1px solid #e0e0e0;
           vertical-align: top;
         }
@@ -283,6 +443,79 @@ export default function PressureJigPreAssyStatusPage() {
         }
         .status-badge-check {
           background: #1e88e5;
+          color: white;
+        }
+        .ng-modal-overlay {
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          background: rgba(0,0,0,0.5);
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          z-index: 1000;
+        }
+        .ng-modal {
+          background: white;
+          padding: 20px;
+          border-radius: 8px;
+          width: 90%;
+          max-width: 500px;
+        }
+        .ng-modal h3 {
+          margin-top: 0;
+          color: #d32f2f;
+        }
+        .ng-modal-actions {
+          display: flex;
+          justify-content: flex-end;
+          gap: 10px;
+        }
+        .ng-modal-actions button {
+          padding: 8px 16px;
+          border: none;
+          border-radius: 4px;
+          cursor: pointer;
+        }
+        .ng-modal-actions button:first-child {
+          background: #f5f5f5;
+          color: #333;
+        }
+        .ng-form-group {
+          margin-bottom: 15px;
+        }
+        .ng-form-group label {
+          display: block;
+          margin-bottom: 5px;
+          font-weight: 600;
+        }
+        .ng-form-group textarea,
+        .ng-form-group select {
+          width: 100%;
+          padding: 8px;
+          border: 1px solid #ccc;
+          border-radius: 4px;
+          font-size: 0.9rem;
+        }
+        .ng-modal-actions {
+          display: flex;
+          justify-content: flex-end;
+          gap: 10px;
+        }
+        .ng-modal-actions button {
+          padding: 8px 16px;
+          border: none;
+          border-radius: 4px;
+          cursor: pointer;
+        }
+        .ng-modal-actions button:first-child {
+          background: #f5f5f5;
+          color: #333;
+        }
+        .btn-primary {
+          background: #1976d2;
           color: white;
         }
       `}</style>
