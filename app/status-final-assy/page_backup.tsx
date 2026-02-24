@@ -1,9 +1,8 @@
-// app/status-final-assy/page_backup.tsx
+// app/status-final-assy/page.tsx
 "use client"
-import { useState, useMemo, useEffect, useCallback } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { useAuth } from "@/lib/auth-context"
-import { DetailModal } from "@/components/ui/detailmodal"
 import React from "react"
 import { Sidebar } from "@/components/Sidebar"
 
@@ -58,6 +57,14 @@ export default function FinalAssyStatusPage() {
   const isGroupLeader = currentRole === "group-leader-qa"
   const isInspector = currentRole === "inspector-qa"
 
+  // ✅ PERMISSION CHECKING YANG JELAS
+  const hasPermission = {
+    canEditInspectorChecklist: isInspector, // Hanya inspector yang bisa edit
+    canViewInspectorData: true, // Semua role bisa lihat data inspector (termasuk group-leader)
+    canEditSignature: isGroupLeader, // Hanya group-leader yang bisa edit signature
+  }
+
+  // === STATE UNTUK SWITCH TABEL ===
   const [viewAs, setViewAs] = useState<"group-leader" | "inspector">(
     isGroupLeader ? "group-leader" : "inspector"
   )
@@ -107,19 +114,15 @@ export default function FinalAssyStatusPage() {
   }
 
   // =====================================================================
-  // === FUNGSI HELPER BARU: PENENTU EDITABLE CELL (INTI SOLUSI) ===
+  // === FUNGSI HELPER: PENENTU EDITABLE CELL ===
   // =====================================================================
-  const isCellEditable = useCallback((
+  const isCellEditable = (
     cellDate: number,
     status: "OK" | "NG" | "-"
   ): boolean => {
     const now = new Date()
-    const currentHour = now.getHours()
-    const currentMinute = now.getMinutes()
-    
-    // Buat Date object untuk tanggal cell
     const cellDateTime = new Date(activeYear, activeMonth, cellDate)
-    
+
     // Jika tanggal berbeda dengan hari ini
     if (cellDateTime.getDate() !== now.getDate() || 
         cellDateTime.getMonth() !== now.getMonth() || 
@@ -127,21 +130,18 @@ export default function FinalAssyStatusPage() {
       
       // Tanggal masa lalu
       if (cellDateTime < now) {
-        // OK yang sudah berlalu = locked (tidak bisa diedit)
         if (status === "OK") return false
-        // NG yang sudah berlalu = masih bisa diubah menjadi OK
         if (status === "NG") return true
-        // "-" pada tanggal lalu = tidak bisa diisi
         return false
       }
       
       // Tanggal masa depan = tidak bisa diedit
       return false
     }
-    
+
     // Untuk hari ini: semua status editable
     return true
-  }, [activeMonth, activeYear])
+  }
 
   const [checkpoints] = useState<CheckPoint[]>([
     {
@@ -368,7 +368,7 @@ export default function FinalAssyStatusPage() {
 
   const [inspectorCheckItems] = useState<InspectorCheckItem[]>([
     {
-      id: 1,
+      id: 1001,
       no: "1",
       itemCheck: "PIPO",
       checkPoint: "ADA NOMOR REGISTER",
@@ -377,7 +377,7 @@ export default function FinalAssyStatusPage() {
       shifts: [{ shift: "A" }, { shift: "B" }]
     },
     {
-      id: 2,
+      id: 1002,
       no: "1",
       itemCheck: "PIPO",
       checkPoint: "PIPO DALAM KONDISI BAIK DAN TIDAK RUSAK",
@@ -386,7 +386,7 @@ export default function FinalAssyStatusPage() {
       shifts: [{ shift: "A" }, { shift: "B" }]
     },
     {
-      id: 3,
+      id: 1003,
       no: "2",
       itemCheck: "ROLL METER / MISTAR BAJA",
       checkPoint: "ADA NOMOR REGISTER + KALIBRASI TIDAK EXPIRED",
@@ -395,7 +395,7 @@ export default function FinalAssyStatusPage() {
       shifts: [{ shift: "A" }, { shift: "B" }]
     },
     {
-      id: 4,
+      id: 1004,
       no: "2",
       itemCheck: "ROLL METER / MISTAR BAJA",
       checkPoint: "GARIS ANGKA TERBACA DENGAN JELAS / TIDAK BERKARAT",
@@ -404,7 +404,7 @@ export default function FinalAssyStatusPage() {
       shifts: [{ shift: "A" }, { shift: "B" }]
     },
     {
-      id: 5,
+      id: 1005,
       no: "2",
       itemCheck: "ROLL METER / MISTAR BAJA",
       checkPoint: "ROLLMETER / MISTAR BAJA DALAM KONDISI BAIK DAN TIDAK RUSAK",
@@ -413,7 +413,7 @@ export default function FinalAssyStatusPage() {
       shifts: [{ shift: "A" }, { shift: "B" }]
     },
     {
-      id: 6,
+      id: 1006,
       no: "3",
       itemCheck: "GO NO GO",
       checkPoint: "ADA NOMOR REGISTER + VERIFIKASI TIDAK EXPIRED",
@@ -422,7 +422,7 @@ export default function FinalAssyStatusPage() {
       shifts: [{ shift: "A" }, { shift: "B" }]
     },
     {
-      id: 7,
+      id: 1007,
       no: "3",
       itemCheck: "GO NO GO",
       checkPoint: "TIDAK ADA SKRUP YANG KENDOR / HILANG",
@@ -431,7 +431,7 @@ export default function FinalAssyStatusPage() {
       shifts: [{ shift: "A" }, { shift: "B" }]
     },
     {
-      id: 8,
+      id: 1008,
       no: "3",
       itemCheck: "GO NO GO",
       checkPoint: "KONDISI GO NO GO DALAM KEADAAN BAIK & BAGIAN BELAKANG (WIRE) DILINDUNGI TAPE / SPIRAL",
@@ -440,7 +440,7 @@ export default function FinalAssyStatusPage() {
       shifts: [{ shift: "A" }, { shift: "B" }]
     },
     {
-      id: 9,
+      id: 1009,
       no: "3",
       itemCheck: "GO NO GO",
       checkPoint: "ADA STIKER WARNA HIJAU PADA GO NO GO TERMINAL (M TERMINAL) DAN TIDAK LEPAS",
@@ -449,7 +449,7 @@ export default function FinalAssyStatusPage() {
       shifts: [{ shift: "A" }, { shift: "B" }]
     },
     {
-      id: 10,
+      id: 1010,
       no: "3",
       itemCheck: "GO NO GO",
       checkPoint: "KONDISI GO NO GO TERMINAL DALAM KEADAAN OK (TIDAK AUS, TIDAK BENT, TIDAK PATAH, TIDAK DEFORMASI)",
@@ -458,7 +458,7 @@ export default function FinalAssyStatusPage() {
       shifts: [{ shift: "A" }, { shift: "B" }]
     },
     {
-      id: 11,
+      id: 1011,
       no: "3",
       itemCheck: "GO NO GO",
       checkPoint: "BISA MENDETEKSI KONDISI OK DAN N-OK MELALUI SAMPLE OK DAN N-OK",
@@ -467,7 +467,7 @@ export default function FinalAssyStatusPage() {
       shifts: [{ shift: "A" }, { shift: "B" }]
     },
     {
-      id: 12,
+      id: 1012,
       no: "4",
       itemCheck: "PUSH GAUGE RB",
       checkPoint: "ADA NOMOR REGISTER + VERIFIKASI TIDAK EXPIRED",
@@ -476,7 +476,7 @@ export default function FinalAssyStatusPage() {
       shifts: [{ shift: "A" }, { shift: "B" }]
     },
     {
-      id: 13,
+      id: 1013,
       no: "4",
       itemCheck: "PUSH GAUGE RB",
       checkPoint: "TIDAK ADA SKRUP YANG KENDOR / HILANG",
@@ -485,7 +485,7 @@ export default function FinalAssyStatusPage() {
       shifts: [{ shift: "A" }, { shift: "B" }]
     },
     {
-      id: 14,
+      id: 1014,
       no: "4",
       itemCheck: "PUSH GAUGE RB",
       checkPoint: "ADA BANTALAN KARET (CUSHION) PADA UJUNGNYA",
@@ -494,7 +494,7 @@ export default function FinalAssyStatusPage() {
       shifts: [{ shift: "A" }, { shift: "B" }]
     },
     {
-      id: 15,
+      id: 1015,
       no: "4",
       itemCheck: "PUSH GAUGE RB",
       checkPoint: "LAMPU INDIKATOR MENYALA",
@@ -503,7 +503,7 @@ export default function FinalAssyStatusPage() {
       shifts: [{ shift: "A" }, { shift: "B" }]
     },
     {
-      id: 16,
+      id: 1016,
       no: "5",
       itemCheck: "DUMMY SAMPLE OK & N-OK",
       checkPoint: "ADA NOMOR REGISTER + VERIFIKASI TIDAK EXPIRED",
@@ -512,7 +512,7 @@ export default function FinalAssyStatusPage() {
       shifts: [{ shift: "A" }, { shift: "B" }]
     },
     {
-      id: 17,
+      id: 1017,
       no: "5",
       itemCheck: "DUMMY SAMPLE OK & N-OK",
       checkPoint: "SAMPLE DALAM KONDISI BAIK DAN TIDAK RUSAK",
@@ -521,7 +521,7 @@ export default function FinalAssyStatusPage() {
       shifts: [{ shift: "A" }, { shift: "B" }]
     },
     {
-      id: 18,
+      id: 1018,
       no: "6",
       itemCheck: "IMPORTANT / INSPECTION POINT",
       checkPoint: "IMPORTANT/INSPECTION POINT TERBACA DENGAN JELAS DAN TIDAK RUSAK",
@@ -530,7 +530,7 @@ export default function FinalAssyStatusPage() {
       shifts: [{ shift: "A" }, { shift: "B" }]
     },
     {
-      id: 19,
+      id: 1019,
       no: "6",
       itemCheck: "IMPORTANT / INSPECTION POINT",
       checkPoint: "ISI IMPORTANT/INSPECTION POINT SESUAI DENGAN LEVEL TERBARU",
@@ -539,7 +539,7 @@ export default function FinalAssyStatusPage() {
       shifts: [{ shift: "A" }, { shift: "B" }]
     },
     {
-      id: 20,
+      id: 1020,
       no: "7",
       itemCheck: "FUSE PLATE",
       checkPoint: "ADA NOMOR REGISTER + VERIFIKASI TIDAK EXPIRED",
@@ -548,7 +548,7 @@ export default function FinalAssyStatusPage() {
       shifts: [{ shift: "A" }, { shift: "B" }]
     },
     {
-      id: 21,
+      id: 1021,
       no: "7",
       itemCheck: "FUSE PLATE",
       checkPoint: "WARNA DAN ANGKA ADA DAN TERBACA DENGAN JELAS",
@@ -557,7 +557,7 @@ export default function FinalAssyStatusPage() {
       shifts: [{ shift: "A" }, { shift: "B" }]
     },
     {
-      id: 22,
+      id: 1022,
       no: "7",
       itemCheck: "FUSE PLATE",
       checkPoint: "FUSE PLATE DALAM KONDISI BAIK DAN TIDAK RUSAK",
@@ -566,7 +566,7 @@ export default function FinalAssyStatusPage() {
       shifts: [{ shift: "A" }, { shift: "B" }]
     },
     {
-      id: 23,
+      id: 1023,
       no: "7",
       itemCheck: "FUSE PLATE",
       checkPoint: "FUSE INSERTION / PENEKAN FUSE DALAM KONDISI OK",
@@ -575,7 +575,7 @@ export default function FinalAssyStatusPage() {
       shifts: [{ shift: "A" }, { shift: "B" }]
     },
     {
-      id: 24,
+      id: 1024,
       no: "8",
       itemCheck: "LAMPU NAVIGASI",
       checkPoint: "LAMPU LED KONDISI MENYALA",
@@ -584,7 +584,7 @@ export default function FinalAssyStatusPage() {
       shifts: [{ shift: "A" }, { shift: "B" }]
     },
     {
-      id: 25,
+      id: 1025,
       no: "8",
       itemCheck: "LAMPU NAVIGASI",
       checkPoint: "COVER LED TIDAK HILANG ATAU PECAH",
@@ -593,7 +593,7 @@ export default function FinalAssyStatusPage() {
       shifts: [{ shift: "A" }, { shift: "B" }]
     },
     {
-      id: 26,
+      id: 1026,
       no: "8",
       itemCheck: "LAMPU NAVIGASI",
       checkPoint: "LAMPU LED TERPASANG SEMPURNA/TIDAK LEPAS",
@@ -602,7 +602,7 @@ export default function FinalAssyStatusPage() {
       shifts: [{ shift: "A" }, { shift: "B" }]
     },
     {
-      id: 27,
+      id: 1027,
       no: "9",
       itemCheck: "TAPE NAVIGASI",
       checkPoint: "LAMPU LED KONDISI MENYALA",
@@ -611,7 +611,7 @@ export default function FinalAssyStatusPage() {
       shifts: [{ shift: "A" }, { shift: "B" }]
     },
     {
-      id: 28,
+      id: 1028,
       no: "9",
       itemCheck: "TAPE NAVIGASI",
       checkPoint: "KONDISI SWITCH TIDAK RUSAK",
@@ -620,7 +620,7 @@ export default function FinalAssyStatusPage() {
       shifts: [{ shift: "A" }, { shift: "B" }]
     },
     {
-      id: 29,
+      id: 1029,
       no: "9",
       itemCheck: "TAPE NAVIGASI",
       checkPoint: "ADA IDENTITAS TAPE",
@@ -629,7 +629,7 @@ export default function FinalAssyStatusPage() {
       shifts: [{ shift: "A" }, { shift: "B" }]
     },
     {
-      id: 30,
+      id: 1030,
       no: "10",
       itemCheck: "INSPECTION BOARD",
       checkPoint: "TIDAK ADA SKRUP & BAUT YANG MENONJOL DAN TAJAM",
@@ -638,7 +638,7 @@ export default function FinalAssyStatusPage() {
       shifts: [{ shift: "A" }, { shift: "B" }]
     },
     {
-      id: 31,
+      id: 1031,
       no: "10",
       itemCheck: "INSPECTION BOARD",
       checkPoint: "APPROVAL SHEET SESUAI LEVEL TERAKHIR",
@@ -647,7 +647,7 @@ export default function FinalAssyStatusPage() {
       shifts: [{ shift: "A" }, { shift: "B" }]
     },
     {
-      id: 32,
+      id: 1032,
       no: "10",
       itemCheck: "INSPECTION BOARD",
       checkPoint: "APPROVAL SHEET DITANDA TANGANI QA",
@@ -656,7 +656,7 @@ export default function FinalAssyStatusPage() {
       shifts: [{ shift: "A" }, { shift: "B" }]
     },
     {
-      id: 33,
+      id: 1033,
       no: "10",
       itemCheck: "INSPECTION BOARD",
       checkPoint: "KONDISI SAMPLE DAN PLASTIK TIDAK RUSAK",
@@ -665,7 +665,7 @@ export default function FinalAssyStatusPage() {
       shifts: [{ shift: "A" }, { shift: "B" }]
     },
     {
-      id: 34,
+      id: 1034,
       no: "11",
       itemCheck: "DRY SURF",
       checkPoint: "BOTOL TIDAK BOCOR / RUSAK & ADA STICKER B3",
@@ -674,7 +674,7 @@ export default function FinalAssyStatusPage() {
       shifts: [{ shift: "A" }, { shift: "B" }]
     },
     {
-      id: 35,
+      id: 1035,
       no: "11",
       itemCheck: "DRY SURF",
       checkPoint: "SPONS / KUAS TIDAK RUSAK / AUS",
@@ -683,7 +683,7 @@ export default function FinalAssyStatusPage() {
       shifts: [{ shift: "A" }, { shift: "B" }]
     },
     {
-      id: 36,
+      id: 1036,
       no: "11",
       itemCheck: "DRY SURF",
       checkPoint: "ADA TANDA MAX & MIN PADA BOTOL DAN ISI CAIRAN SESUAI RENTANG MAX DAN MIN",
@@ -692,7 +692,7 @@ export default function FinalAssyStatusPage() {
       shifts: [{ shift: "A" }, { shift: "B" }]
     },
     {
-      id: 37,
+      id: 1037,
       no: "12",
       itemCheck: "PACKING",
       checkPoint: "KONDISI TUTUP POLYTAINER TIDAK RUSAK DAN JUMLAHNYA SUDAH SESUAI",
@@ -701,7 +701,7 @@ export default function FinalAssyStatusPage() {
       shifts: [{ shift: "A" }, { shift: "B" }]
     },
     {
-      id: 38,
+      id: 1038,
       no: "12",
       itemCheck: "PACKING",
       checkPoint: "HT SCAN BISA BERFUNGSI DENGAN BAIK",
@@ -710,7 +710,7 @@ export default function FinalAssyStatusPage() {
       shifts: [{ shift: "A" }, { shift: "B" }]
     },
     {
-      id: 39,
+      id: 1039,
       no: "12",
       itemCheck: "PACKING",
       checkPoint: "MAJUN DAN SIKAT POLYTAINER ADA PADA TEMPATNYA DAN SESUAI DENGAN JUMLAHNYA",
@@ -750,108 +750,219 @@ export default function FinalAssyStatusPage() {
     return checkDates.includes(date)
   }
 
-  const getStorageKey = (type: "group-leader" | "inspector") => {
-    return `finalAssy_${type}_DailyCheckResults`
+  // === STATE DATA (DARI DATABASE) ===
+  const [groupLeaderResults, setGroupLeaderResults] = useState<Record<string, Record<string, CheckResult>>>({})
+  const [inspectorResults, setInspectorResults] = useState<Record<string, Record<string, CheckResult>>>({})
+  const [glSignaturesGroupLeader, setGlSignaturesGroupLeader] = useState<Record<string, Record<string, "-" | "OK" | "NG">>>({})
+  const [glSignaturesInspector, setGlSignaturesInspector] = useState<Record<string, Record<string, "-" | "OK" | "NG">>>({})
+
+  // === STATE LOADING & ERROR ===
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  // =====================================================================
+  // === API CALLS ===
+  // =====================================================================
+  const apiBaseUrl = '/api/final-assy'
+
+  // Simpan hasil check ke database
+  const saveResultToDB = async (
+    categoryCode: string,
+    itemId: number,
+    dateKey: string,
+    shift: "A" | "B",
+    status: "OK" | "NG" | "-",
+    ngDescription?: string,
+    ngDepartment?: string
+  ) => {
+    if (!user?.id) {
+      setError("User tidak terautentikasi");
+      return;
+    }
+
+    try {
+      const response = await fetch(`${apiBaseUrl}/save-result`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.id,
+          categoryCode,
+          itemId,
+          dateKey,
+          shift,
+          status,
+          ngDescription: ngDescription || null,
+          ngDepartment: ngDepartment || null
+        })
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Gagal menyimpan ke database');
+      }
+
+      const data = await response.json();
+      console.log('✅ Data tersimpan:', data);
+    } catch (error) {
+      console.error('❌ Error saving to DB:', error);
+      setError(error instanceof Error ? error.message : 'Gagal menyimpan data ke database');
+    }
   }
 
-  const [groupLeaderResults, setGroupLeaderResults] = useState<Record<string, Record<string, CheckResult>>>(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem(getStorageKey("group-leader"))
-      return saved ? JSON.parse(saved) : {}
+  // Simpan signature ke database
+  const saveSignatureToDB = async (
+    categoryCode: string,
+    dateKey: string,
+    shift: "A" | "B",
+    signatureStatus: "-" | "OK" | "NG",
+    tableType: "group-leader" | "inspector"
+  ) => {
+    if (!user?.id) {
+      setError("User tidak terautentikasi");
+      return;
     }
-    return {}
-  })
 
-  const [inspectorResults, setInspectorResults] = useState<Record<string, Record<string, CheckResult>>>(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem(getStorageKey("inspector"))
-      return saved ? JSON.parse(saved) : {}
-    }
-    return {}
-  })
+    try {
+      const response = await fetch(`${apiBaseUrl}/save-signature`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.id,
+          categoryCode,
+          dateKey,
+          shift,
+          signatureStatus,
+          tableType
+        })
+      })
 
-  // === STATE SIGNATURES TERPISAH ===
-  const [glSignaturesGroupLeader, setGlSignaturesGroupLeader] = useState<Record<string, Record<string, "-" | "OK" | "NG">>>(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem(`finalAssy_gl_signatures_group_leader`)
-      return saved ? JSON.parse(saved) : {}
-    }
-    return {}
-  })
-
-  const [glSignaturesInspector, setGlSignaturesInspector] = useState<Record<string, Record<string, "-" | "OK" | "NG">>>(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem(`finalAssy_gl_signatures_inspector`)
-      return saved ? JSON.parse(saved) : {}
-    }
-    return {}
-  })
-
-  useEffect(() => {
-    const loadResults = () => {
-      if (typeof window !== "undefined") {
-        const savedGL = localStorage.getItem(getStorageKey("group-leader"))
-        setGroupLeaderResults(savedGL ? JSON.parse(savedGL) : {})
-        
-        const savedInsp = localStorage.getItem(getStorageKey("inspector"))
-        setInspectorResults(savedInsp ? JSON.parse(savedInsp) : {})
-        
-        // Load signatures terpisah
-        const savedSignaturesGL = localStorage.getItem(`finalAssy_gl_signatures_group_leader`)
-        setGlSignaturesGroupLeader(savedSignaturesGL ? JSON.parse(savedSignaturesGL) : {})
-        
-        const savedSignaturesInsp = localStorage.getItem(`finalAssy_gl_signatures_inspector`)
-        setGlSignaturesInspector(savedSignaturesInsp ? JSON.parse(savedSignaturesInsp) : {})
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Gagal menyimpan tanda tangan ke database');
       }
+
+      const data = await response.json();
+      console.log('✅ Tanda tangan tersimpan:', data);
+    } catch (error) {
+      console.error('❌ Error saving signature to DB:', error);
+      setError(error instanceof Error ? error.message : 'Gagal menyimpan tanda tangan ke database');
     }
+  }
 
-    loadResults()
+  // ✅ MODIFIKASI UTAMA: LOAD DATA INSPECTOR UNTUK GROUP LEADER
+  // Backend harus mendukung parameter `view=all` untuk group-leader
+  // Load data dari database
+  const loadDataFromDB = async () => {
+    if (!user) return;
+    setIsLoading(true);
+    setError(null);
 
-    const handleStorage = () => loadResults()
-    window.addEventListener("storage", handleStorage)
-    return () => window.removeEventListener("storage", handleStorage)
-  }, [])
+    try {
+      const monthKey = `${activeYear}-${String(activeMonth + 1).padStart(2, '0')}`;
+      
+      // Kode kategori untuk kedua tabel
+      const glCategoryCode = "final-assy-gl";
+      const inspectorCategoryCode = "final-assy-inspector";
+
+      if (showGroupLeaderTable) {
+        // Load data untuk tabel Group Leader
+        const [resultsRes, signaturesRes] = await Promise.all([
+          fetch(`${apiBaseUrl}/get-results?userId=${user.id}&categoryCode=${glCategoryCode}&month=${monthKey}&role=${currentRole}`),
+          fetch(`${apiBaseUrl}/get-signatures?userId=${user.id}&categoryCode=${glCategoryCode}&month=${monthKey}&role=${currentRole}`)
+        ]);
+
+        if (!resultsRes.ok || !signaturesRes.ok) {
+          throw new Error('Gagal memuat data dari server');
+        }
+
+        const resultsData = await resultsRes.json();
+        const signaturesData = await signaturesRes.json();
+
+        if (resultsData.success) {
+          setGroupLeaderResults(resultsData.formatted);
+        }
+        if (signaturesData.success) {
+          setGlSignaturesGroupLeader(signaturesData.formatted);
+        }
+      }
+
+      if (showInspectorTable) {
+        // ✅ Load data untuk tabel Inspector - Kirim parameter role
+        const [resultsRes, signaturesRes] = await Promise.all([
+          fetch(`${apiBaseUrl}/get-results?userId=${user.id}&categoryCode=${inspectorCategoryCode}&month=${monthKey}&role=${currentRole}`),
+          fetch(`${apiBaseUrl}/get-signatures?userId=${user.id}&categoryCode=${inspectorCategoryCode}&month=${monthKey}&role=${currentRole}`)
+        ]);
+
+        if (!resultsRes.ok || !signaturesRes.ok) {
+          const errorData = await resultsRes.json().catch(() => ({}));
+          console.error('Error loading inspector data:', errorData);
+          throw new Error(errorData.error || 'Gagal memuat data inspector dari server');
+        }
+
+        const resultsData = await resultsRes.json();
+        const signaturesData = await signaturesRes.json();
+
+        if (resultsData.success) {
+          setInspectorResults(resultsData.formatted);
+        }
+        if (signaturesData.success) {
+          setGlSignaturesInspector(signaturesData.formatted);
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error loading from DB:', error);
+      setError(error instanceof Error ? error.message : 'Gagal memuat data dari database');
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  // Load data saat component mount atau saat bulan/view berubah
+  useEffect(() => {
+    loadDataFromDB();
+  }, [user?.id, activeMonth, activeYear, viewAs, isGroupLeader]);
 
   // === GANTI januaryDates DENGAN dynamicDates ===
   const dynamicDates = useMemo(() => {
-    const daysInMonth = getDaysInMonth(activeYear, activeMonth)
-    return Array.from({ length: daysInMonth }, (_, i) => i + 1)
-  }, [activeMonth, activeYear])
+    const daysInMonth = getDaysInMonth(activeYear, activeMonth);
+    return Array.from({ length: daysInMonth }, (_, i) => i + 1);
+  }, [activeMonth, activeYear]);
 
   // === PERUBAHAN PADA TANGGAL HARI INI ===
-  const today = new Date().getDate()
-  const currentMonth = new Date().getMonth()
-  const currentYear = new Date().getFullYear()
-  const isCurrentMonth = activeMonth === currentMonth && activeYear === currentYear
+  const today = new Date().getDate();
+  const currentMonth = new Date().getMonth();
+  const currentYear = new Date().getFullYear();
+  const isCurrentMonth = activeMonth === currentMonth && activeYear === currentYear;
 
   // === MODIFIKASI FUNGSI getResult ===
   const getResult = (date: number, checkpointId: number, shift: "A" | "B", type: "group-leader" | "inspector") => {
-    const dateKey = getDateKey(date)
-    const checkpointKey = `${checkpointId}-${shift}`
-    const results = type === "group-leader" ? groupLeaderResults : inspectorResults
-    return results[dateKey]?.[checkpointKey] || null
+    const dateKey = getDateKey(date);
+    const checkpointKey = `${checkpointId}-${shift}`;
+    const results = type === "group-leader" ? groupLeaderResults : inspectorResults;
+    return results[dateKey]?.[checkpointKey] || null;
   }
 
   // === MODIFIKASI: TAMBAHKAN PARAMETER type ===
   const getGLSignature = (date: number, shift: "A" | "B", type: "group-leader" | "inspector"): "-" | "OK" | "NG" => {
-    const dateKey = getDateKey(date)
-    const signatures = type === "group-leader" ? glSignaturesGroupLeader : glSignaturesInspector
-    return signatures[dateKey]?.[shift] || "-"
+    const dateKey = getDateKey(date);
+    const signatures = type === "group-leader" ? glSignaturesGroupLeader : glSignaturesInspector;
+    return signatures[dateKey]?.[shift] || "-";
   }
 
   // === MODIFIKASI: TAMBAHKAN PARAMETER type ===
-  const handleGLSignatureChange = (
+  const handleGLSignatureChange = async (
     date: number,
     shift: "A" | "B",
     value: "-" | "OK" | "NG",
     type: "group-leader" | "inspector"
   ) => {
-    const dateKey = getDateKey(date)
-    const currentSignatures = type === "group-leader" ? glSignaturesGroupLeader : glSignaturesInspector
-    const setSignatures = type === "group-leader" ? setGlSignaturesGroupLeader : setGlSignaturesInspector
-    const storageKey = type === "group-leader"
-      ? `finalAssy_gl_signatures_group_leader`
-      : `finalAssy_gl_signatures_inspector`
+    // ✅ Hanya group-leader yang bisa edit signature
+    if (!hasPermission.canEditSignature) return;
+
+    const dateKey = getDateKey(date);
+    const currentSignatures = type === "group-leader" ? glSignaturesGroupLeader : glSignaturesInspector;
+    const setSignatures = type === "group-leader" ? setGlSignaturesGroupLeader : setGlSignaturesInspector;
+    const categoryCode = type === "group-leader" ? "final-assy-gl" : "final-assy-inspector";
 
     const newSignatures = {
       ...currentSignatures,
@@ -859,12 +970,12 @@ export default function FinalAssyStatusPage() {
         ...currentSignatures[dateKey],
         [shift]: value
       }
-    }
+    };
 
-    setSignatures(newSignatures)
-    if (typeof window !== "undefined") {
-      localStorage.setItem(storageKey, JSON.stringify(newSignatures))
-    }
+    setSignatures(newSignatures);
+
+    // Simpan ke database
+    await saveSignatureToDB(categoryCode, dateKey, shift, value, type);
   }
 
   const [ngModal, setNgModal] = useState<{
@@ -874,170 +985,146 @@ export default function FinalAssyStatusPage() {
     type: "group-leader" | "inspector"
     notes: string
     department: string
-  } | null>(null)
+  } | null>(null);
 
-  const [modalData, setModalData] = useState<{
-    date: number
-    checkpoint: {
-      checkPoint?: string
-      shift: string
-      waktuCheck?: string
-      standard?: string
-    }
-    result: CheckResult
-  } | null>(null)
+  const departments = ["QA", "Produksi", "Maintenance", "Logistik", "Engineering"];
 
-  const departments = ["QA", "Produksi", "Maintenance", "Logistik", "Engineering"]
-
-  const getCheckpointName = (item: CheckPoint | InspectorCheckItem | undefined): string => {
-    if (!item) return "Unknown";
-    if ('checkPoint' in item) {
-      return (item as CheckPoint).checkPoint;
-    }
-    if ('itemCheck' in item) {
-      return (item as InspectorCheckItem).itemCheck;
-    }
-    return "Unknown";
-  };
-
-  // === PERBAIKAN UTAMA: HANDLE STATUS CHANGE DENGAN DEEP CLONE ===
-  const handleStatusChange = (
+  // === PERBAIKAN UTAMA: HANDLE STATUS CHANGE DENGAN DATABASE ===
+  const handleStatusChange = async (
     date: number,
     itemId: number,
     shift: "A" | "B",
     newStatus: "OK" | "NG" | "-",
     type: "group-leader" | "inspector"
   ) => {
-    const dateKey = getDateKey(date)
-    const itemKey = `${itemId}-${shift}`
-    const currentResults = type === "group-leader" ? groupLeaderResults : inspectorResults
-    const setResults = type === "group-leader" ? setGroupLeaderResults : setInspectorResults
-    const storageKey = getStorageKey(type)
+    // ✅ Hanya inspector yang bisa edit data inspector
+    if (type === "inspector" && !hasPermission.canEditInspectorChecklist) {
+      return;
+    }
 
-    // DEEP CLONE untuk menghindari reference issues pada nested objects
-    const newResults = JSON.parse(JSON.stringify(currentResults))
+    const dateKey = getDateKey(date);
+    const itemKey = `${itemId}-${shift}`;
+    const currentResults = type === "group-leader" ? groupLeaderResults : inspectorResults;
+    const setResults = type === "group-leader" ? setGroupLeaderResults : setInspectorResults;
+    const categoryCode = type === "group-leader" ? "final-assy-gl" : "final-assy-inspector";
+
+    // DEEP CLONE untuk menghindari mutasi state
+    const newResults = JSON.parse(JSON.stringify(currentResults));
 
     if (newStatus === "-") {
-      // Hapus entry jika status diubah menjadi "-"
+      // Hapus entry jika user pilih "-"
       if (newResults[dateKey]?.[itemKey]) {
-        delete newResults[dateKey][itemKey]
+        delete newResults[dateKey][itemKey];
         if (Object.keys(newResults[dateKey]).length === 0) {
-          delete newResults[dateKey]
+          delete newResults[dateKey];
         }
       }
-    } else if (newStatus === "NG") {
-      // Update atau tambah entry NG
-      const existing = newResults[dateKey]?.[itemKey]
       
-      newResults[dateKey] = newResults[dateKey] || {}
+      // Update state
+      setResults(newResults);
+      
+      // Simpan ke database (akan delete di backend)
+      await saveResultToDB(categoryCode, itemId, dateKey, shift, newStatus);
+      
+    } else if (newStatus === "NG") {
+      const existing = newResults[dateKey]?.[itemKey];
+      
+      newResults[dateKey] = newResults[dateKey] || {};
       newResults[dateKey][itemKey] = {
         status: "NG",
         ngCount: 1,
         items: existing?.items || [],
-        notes: existing?.notes || "     ",
+        notes: existing?.notes || "",
         submittedAt: new Date().toISOString(),
         submittedBy: user?.fullName || "Unknown",
-        ngDescription: existing?.ngDescription || "     ",
+        ngDescription: existing?.ngDescription || "",
         ngDepartment: existing?.ngDepartment || departments[0]
-      }
+      };
       
-      // Buka modal NG untuk edit notes
+      // Update state dulu
+      setResults(newResults);
+      
+      // Buka modal untuk input detail NG
       setNgModal({
         date,
         itemId,
         shift,
         type,
-        notes: existing?.ngDescription || "     ",
+        notes: existing?.ngDescription || "",
         department: existing?.ngDepartment || departments[0]
-      })
-    } else {
-      // Update atau tambah entry OK
-      const existing = newResults[dateKey]?.[itemKey]
+      });
       
-      newResults[dateKey] = newResults[dateKey] || {}
+    } else {
+      // Status "OK"
+      const existing = newResults[dateKey]?.[itemKey];
+      
+      newResults[dateKey] = newResults[dateKey] || {};
       newResults[dateKey][itemKey] = {
         status: "OK",
         ngCount: 0,
         items: existing?.items || [],
-        notes: existing?.notes || "     ",
+        notes: existing?.notes || "",
         submittedAt: new Date().toISOString(),
         submittedBy: user?.fullName || "Unknown",
-        ngDescription: existing?.ngDescription || "     ",
-        ngDepartment: existing?.ngDepartment || departments[0]
-      }
-    }
-
-    // Update state dan localStorage
-    setResults(newResults)
-    if (typeof window !== "undefined") {
-      localStorage.setItem(storageKey, JSON.stringify(newResults))
+        ngDescription: "",
+        ngDepartment: ""
+      };
+      
+      // Update state
+      setResults(newResults);
+      
+      // Simpan ke database
+      await saveResultToDB(categoryCode, itemId, dateKey, shift, newStatus);
     }
   }
 
-  // === PERBAIKAN UTAMA: SAVE NG REPORT DENGAN DEEP CLONE ===
-  const saveNgReport = () => {
-    if (!ngModal) return
+  // === SAVE NG REPORT ===
+  const saveNgReport = async () => {
+    if (!ngModal) return;
+    const { date, itemId, shift, type, notes, department } = ngModal;
+    const dateKey = getDateKey(date);
+    const itemKey = `${itemId}-${shift}`;
+    const categoryCode = type === "group-leader" ? "final-assy-gl" : "final-assy-inspector";
+    const currentResults = type === "group-leader" ? groupLeaderResults : inspectorResults;
+    const setResults = type === "group-leader" ? setGroupLeaderResults : setInspectorResults;
 
-    const { date, itemId, shift, type, notes, department } = ngModal
-    const dateKey = getDateKey(date)
-    const itemKey = `${itemId}-${shift}`
-    const currentResults = type === "group-leader" ? groupLeaderResults : inspectorResults
-    const setResults = type === "group-leader" ? setGroupLeaderResults : setInspectorResults
-    const storageKey = getStorageKey(type)
-
-    // DEEP CLONE
-    const newResults = JSON.parse(JSON.stringify(currentResults))
-
-    newResults[dateKey] = newResults[dateKey] || {}
-    newResults[dateKey][itemKey] = {
-      ...newResults[dateKey][itemKey],
-      ngDescription: notes,
-      ngDepartment: department
+    // Update state dengan detail NG
+    const newResults = JSON.parse(JSON.stringify(currentResults));
+    if (newResults[dateKey]?.[itemKey]) {
+      newResults[dateKey][itemKey].ngDescription = notes;
+      newResults[dateKey][itemKey].ngDepartment = department;
     }
+    setResults(newResults);
 
-    setResults(newResults)
-    if (typeof window !== "undefined") {
-      localStorage.setItem(storageKey, JSON.stringify(newResults))
-    }
+    // Simpan ke database dengan detail NG
+    await saveResultToDB(categoryCode, itemId, dateKey, shift, "NG", notes, department);
 
-    setNgModal(null)
+    setNgModal(null);
   }
 
   // =====================================================================
-  // === FUNGSI RENDER STATUS CELL - DIPERBAIKI DENGAN LOGIKA EDITABLE ===
+  // === FUNGSI RENDER STATUS CELL ===
   // =====================================================================
-  const renderStatusCell = useCallback((date: number, checkpoint: CheckPoint, shift: "A" | "B") => {
-    const shouldCheck = isCheckDate(checkpoint, shift, date)
+  const renderStatusCell = (date: number, checkpoint: CheckPoint, shift: "A" | "B") => {
+    const shouldCheck = isCheckDate(checkpoint, shift, date);
     if (!shouldCheck) {
-      return "-"
+      return "-";
     }
 
-    const result = getResult(date, checkpoint.id, shift, "group-leader")
-    
-    // Ambil status dari result atau localStorage
-    const dateKey = getDateKey(date)
-    const itemKey = `${checkpoint.id}-${shift}`
-    const storedStatus = result?.status || groupLeaderResults[dateKey]?.[itemKey]?.status || "-"
-    
-    // Gunakan storedStatus sebagai currentStatus
-    const currentStatus = storedStatus
-    
-    // Tentukan apakah cell editable menggunakan fungsi helper
-    const isEditable = isCellEditable(date, currentStatus as "OK" | "NG" | "-")
-    
-    // Tentukan warna background
+    const result = getResult(date, checkpoint.id, shift, "group-leader");
+    const currentStatus = result?.status || "-";
+
+    const isEditable = isCellEditable(date, currentStatus as "OK" | "NG" | "-");
     const getBgColor = (status: string) => {
-      if (status === "OK") return "#4caf50"
-      if (status === "NG") return "#f44336"
-      return "#9e9e9e"
-    }
-    
-    // Jika tidak ada data dan bukan hari ini, tampilkan "-"
+      if (status === "OK") return "#4caf50";
+      if (status === "NG") return "#f44336";
+      return "#9e9e9e";
+    };
+
     if (currentStatus === "-" && !isEditable) {
-      return <span style={{ color: "#9e9e9e" }}>-</span>
+      return <span style={{ color: "#9e9e9e" }}>-</span>;
     }
-    
-    // Render dropdown jika editable, atau badge statis jika tidak
+
     if (isEditable) {
       return (
         <select
@@ -1060,14 +1147,10 @@ export default function FinalAssyStatusPage() {
           <option value="OK">✓ OK</option>
           <option value="NG">✗ NG</option>
         </select>
-      )
+      );
     } else {
-      // Tampilkan badge statis (read-only)
       return (
         <span
-          className={`status-badge ${
-            currentStatus === "OK" ? "status-badge-ok" : "status-badge-ng"
-          }`}
           style={{
             display: 'inline-block',
             width: '100%',
@@ -1082,48 +1165,59 @@ export default function FinalAssyStatusPage() {
         >
           {currentStatus}
         </span>
-      )
+      );
     }
-  }, [getResult, groupLeaderResults, isCellEditable, handleStatusChange])
+  }
 
   // =====================================================================
-  // === FUNGSI RENDER INSPECTOR STATUS CELL - DIPERBAIKI ===
+  // ✅ FUNGSI RENDER INSPECTOR STATUS CELL (READ-ONLY UNTUK GROUP LEADER) ===
   // =====================================================================
-  const renderInspectorStatusCell = useCallback((date: number, itemId: number, shift: "A" | "B") => {
-    const item = inspectorCheckItems.find(i => i.id === itemId)
-    if (!item) return null
+  const renderInspectorStatusCell = (date: number, itemId: number, shift: "A" | "B") => {
+    const item = inspectorCheckItems.find(i => i.id === itemId);
+    if (!item) return null;
 
-    const shouldCheck = isCheckDate(item, shift, date)
+    const shouldCheck = isCheckDate(item, shift, date);
     if (!shouldCheck) {
-      return "-"
+      return "-";
     }
 
-    const result = getResult(date, itemId, shift, "inspector")
-    
-    // Ambil status dari result atau localStorage
-    const dateKey = getDateKey(date)
-    const itemKey = `${itemId}-${shift}`
-    const storedStatus = result?.status || inspectorResults[dateKey]?.[itemKey]?.status || "-"
-    
-    // Gunakan storedStatus sebagai currentStatus
-    const currentStatus = storedStatus
-    
-    // Tentukan apakah cell editable menggunakan fungsi helper
-    const isEditable = isCellEditable(date, currentStatus as "OK" | "NG" | "-")
-    
-    // Tentukan warna background
+    const result = getResult(date, itemId, shift, "inspector");
+    const currentStatus = result?.status || "-";
+
+    // ✅ Hanya inspector yang bisa edit
+    const isEditable = isCellEditable(date, currentStatus as "OK" | "NG" | "-") && hasPermission.canEditInspectorChecklist;
     const getBgColor = (status: string) => {
-      if (status === "OK") return "#4caf50"
-      if (status === "NG") return "#f44336"
-      return "#9e9e9e"
-    }
-    
-    // Jika tidak ada data dan bukan hari ini, tampilkan "-"
+      if (status === "OK") return "#4caf50";
+      if (status === "NG") return "#f44336";
+      return "#9e9e9e";
+    };
+
     if (currentStatus === "-" && !isEditable) {
-      return <span style={{ color: "#9e9e9e" }}>-</span>
+      return <span style={{ color: "#9e9e9e" }}>-</span>;
     }
-    
-    // Render dropdown jika editable, atau badge statis jika tidak
+
+    // ✅ GROUP LEADER: READ-ONLY VIEW (TIDAK BISA EDIT)
+    if (!hasPermission.canEditInspectorChecklist) {
+      return (
+        <span
+          style={{
+            display: 'inline-block',
+            width: '100%',
+            backgroundColor: getBgColor(currentStatus),
+            color: 'white',
+            padding: '4px 8px',
+            borderRadius: '4px',
+            fontWeight: '500',
+            fontSize: '12px',
+            textAlign: 'center'
+          }}
+        >
+          {currentStatus}
+        </span>
+      );
+    }
+
+    // ✅ INSPECTOR: BISA EDIT
     if (isEditable) {
       return (
         <select
@@ -1146,14 +1240,10 @@ export default function FinalAssyStatusPage() {
           <option value="OK">✓ OK</option>
           <option value="NG">✗ NG</option>
         </select>
-      )
+      );
     } else {
-      // Tampilkan badge statis (read-only)
       return (
         <span
-          className={`status-badge ${
-            currentStatus === "OK" ? "status-badge-ok" : "status-badge-ng"
-          }`}
           style={{
             display: 'inline-block',
             width: '100%',
@@ -1168,55 +1258,42 @@ export default function FinalAssyStatusPage() {
         >
           {currentStatus}
         </span>
-      )
+      );
     }
-  }, [getResult, inspectorResults, isCellEditable, handleStatusChange])
+  }
 
   const renderWeeklyAssignment = (date: number) => {
-    if (date >= 1 && date <= 7) return "week-1 : Checker"
-    if (date >= 8 && date <= 14) return "week-2 : Visual 1"
-    if (date >= 15 && date <= 21) return "week-3 : Visual 2"
-    if (date >= 22 && date <= 31) return "week-4 : R.I / Double Check"
-    return " "
+    if (date >= 1 && date <= 7) return "week-1 : Checker";
+    if (date >= 8 && date <= 14) return "week-2 : Visual 1";
+    if (date >= 15 && date <= 21) return "week-3 : Visual 2";
+    if (date >= 22 && date <= 31) return "week-4 : R.I / Double Check";
+    return "";
   }
 
   const renderESOCell = (date: number, shift: "A" | "B") => {
-    const dayOfWeek = new Date(activeYear, activeMonth, date).getDay()
-    const isTuesdayOrThursday = dayOfWeek === 2 || dayOfWeek === 4
+    const dayOfWeek = new Date(activeYear, activeMonth, date).getDay();
+    const isTuesdayOrThursday = dayOfWeek === 2 || dayOfWeek === 4;
     if (!isTuesdayOrThursday) {
-      return "-"
+      return "-";
     }
-    
-    // Cek apakah sudah ada data untuk ESO
-    const esoCheckpoint = checkpoints.find(cp => cp.type === "special")
-    if (!esoCheckpoint) return "CHECK"
 
-    const result = getResult(date, esoCheckpoint.id, shift, "group-leader")
-    
-    // Ambil status dari result atau localStorage
-    const dateKey = getDateKey(date)
-    const itemKey = `${esoCheckpoint.id}-${shift}`
-    const storedStatus = result?.status || groupLeaderResults[dateKey]?.[itemKey]?.status || "-"
-    
-    // Gunakan storedStatus sebagai currentStatus
-    const currentStatus = storedStatus
-    
-    // Tentukan apakah cell editable menggunakan fungsi helper
-    const isEditable = isCellEditable(date, currentStatus as "OK" | "NG" | "-")
-    
-    // Tentukan warna background
+    const esoCheckpoint = checkpoints.find(cp => cp.type === "special");
+    if (!esoCheckpoint) return "CHECK";
+
+    const result = getResult(date, esoCheckpoint.id, shift, "group-leader");
+    const currentStatus = result?.status || "-";
+
+    const isEditable = isCellEditable(date, currentStatus as "OK" | "NG" | "-");
     const getBgColor = (status: string) => {
-      if (status === "OK") return "#4caf50"
-      if (status === "NG") return "#f44336"
-      return "#9e9e9e"
-    }
-    
-    // Jika tidak ada data dan bukan hari ini, tampilkan "-"
+      if (status === "OK") return "#4caf50";
+      if (status === "NG") return "#f44336";
+      return "#9e9e9e";
+    };
+
     if (currentStatus === "-" && !isEditable) {
-      return <span style={{ color: "#9e9e9e" }}>-</span>
+      return <span style={{ color: "#9e9e9e" }}>-</span>;
     }
-    
-    // Render dropdown jika editable, atau badge statis jika tidak
+
     if (isEditable) {
       return (
         <select
@@ -1234,14 +1311,10 @@ export default function FinalAssyStatusPage() {
           <option value="OK">✓ OK</option>
           <option value="NG">✗ NG</option>
         </select>
-      )
+      );
     } else {
-      // Tampilkan badge statis (read-only)
       return (
         <span
-          className={`status-badge ${
-            currentStatus === "OK" ? "status-badge-ok" : "status-badge-ng"
-          }`}
           style={{
             display: 'inline-block',
             width: '100%',
@@ -1256,47 +1329,47 @@ export default function FinalAssyStatusPage() {
         >
           {currentStatus}
         </span>
-      )
+      );
     }
   }
 
   const shouldShowIcon = (item: InspectorCheckItem, areaType: string) => {
     switch (item.itemCheck) {
       case "PIPO":
-        return true
+        return true;
       case "ROLL METER / MISTAR BAJA":
-        return areaType === "visual-1" || areaType === "visual-2"
+        return areaType === "visual-1" || areaType === "visual-2";
       case "GO NO GO":
-        return true
+        return true;
       case "PUSH GAUGE RB":
-        return areaType === "visual-2" || areaType === "double-check"
+        return areaType === "visual-2" || areaType === "double-check";
       case "DUMMY SAMPLE OK & N-OK":
-        return true
+        return true;
       case "IMPORTANT / INSPECTION POINT":
-        return true
+        return true;
       case "FUSE PLATE":
-        return areaType === "checker" || areaType === "visual-2"
+        return areaType === "checker" || areaType === "visual-2";
       case "LAMPU NAVIGASI":
-        return areaType === "visual-1" || areaType === "visual-2"
+        return areaType === "visual-1" || areaType === "visual-2";
       case "TAPE NAVIGASI":
-        return areaType === "checker" || areaType === "visual-1" || areaType === "visual-2"
+        return areaType === "checker" || areaType === "visual-1" || areaType === "visual-2";
       case "INSPECTION BOARD":
-        return areaType === "checker" || areaType === "visual-1" || areaType === "visual-2" || areaType === "double-check"
+        return areaType === "checker" || areaType === "visual-1" || areaType === "visual-2" || areaType === "double-check";
       case "DRY SURF":
-        return areaType === "visual-2"
+        return areaType === "visual-2";
       case "PACKING":
-        return areaType === "double-check"
+        return areaType === "double-check";
       default:
-        return false
+        return false;
     }
   }
 
   const title =
     showGroupLeaderTable
       ? "CHECK SHEET PATROLI HARIAN GROUP LEADER INSPEKSI F/A"
-      : "Daily Check Inspector Final Assy"
+      : "Daily Check Inspector Final Assy";
 
-  if (!user) return null
+  if (!user) return null;
 
   return (
     <>
@@ -1311,80 +1384,123 @@ export default function FinalAssyStatusPage() {
         }}
         className="page-content"
       >
-        <div className="header">
-          <h1>{title}</h1>
-          <div className="role-info">
-            {isGroupLeader && (
-              <select
-                value={viewAs}
-                onChange={(e) => setViewAs(e.target.value as "group-leader" | "inspector")}
-                className="view-dropdown"
-              >
-                <option value="group-leader">Daily Check GL</option>
-                <option value="inspector">Daily Check Inspector</option>
-              </select>
-            )}
-            <span>Role:</span>
-            <span className="role-badge">
-              {isGroupLeader ? "Group Leader" : "Inspector"}
-            </span>
-          </div>
+        <h1 style={{ marginBottom: '15px' }}>{title}</h1>
+
+        {isGroupLeader && (
+          <select
+            value={viewAs}
+            onChange={(e) => setViewAs(e.target.value as "group-leader" | "inspector")}
+            className="view-dropdown-fa"
+            style={{
+              marginBottom: '15px',
+              padding: '8px 12px',
+              fontSize: '14px',
+              borderRadius: '4px',
+              border: '1px solid #ccc'
+            }}
+          >
+            <option value="group-leader">Daily Check GL</option>
+            <option value="inspector">Daily Check Inspector</option>
+          </select>
+        )}
+
+        <div style={{ marginBottom: '10px', fontSize: '14px', color: '#666' }}>
+          Role: {isGroupLeader ? "Group Leader QA" : "Inspector QA"}
         </div>
 
-        {/* === NAVIGASI BULAN BARU === */}
-        {showInspectorTable && (
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-            <button
-              onClick={() => changeMonth(-1)}
-              className="nav-button"
-              style={{
-                padding: '8px 16px',
-                backgroundColor: '#1976d2',
-                color: 'white',
-                border: 'none',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                fontWeight: 'bold'
-              }}
-            >
-              ← Bulan Lalu
-            </button>
-            <span className="month-title" style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>
-              {getMonthName(activeMonth)} {activeYear}
-            </span>
-            <button
-              onClick={() => changeMonth(1)}
-              className="nav-button"
-              style={{
-                padding: '8px 16px',
-                backgroundColor: '#1976d2',
-                color: 'white',
-                border: 'none',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                fontWeight: 'bold'
-              }}
-            >
-              Bulan Depan →
-            </button>
+        {/* === NAVIGASI BULAN === */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+          <button
+            onClick={() => changeMonth(-1)}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: '#1976d2',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontWeight: 'bold'
+            }}
+          >
+            ← Bulan Lalu
+          </button>
+          <span style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>
+            {getMonthName(activeMonth)} {activeYear}
+          </span>
+          <button
+            onClick={() => changeMonth(1)}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: '#1976d2',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontWeight: 'bold'
+            }}
+          >
+            Bulan Depan →
+          </button>
+        </div>
+
+        {/* === LOADING INDICATOR === */}
+        {isLoading && (
+          <div style={{ textAlign: 'center', padding: '20px' }}>
+            <div style={{ 
+              display: 'inline-block', 
+              width: '40px', 
+              height: '40px', 
+              border: '4px solid #1976d2', 
+              borderTopColor: 'transparent', 
+              borderRadius: '50%', 
+              animation: 'spin 1s linear infinite' 
+            }}></div>
+            <p style={{ marginTop: '10px', color: '#666' }}>Memuat data inspector...</p>
           </div>
         )}
 
-        <div className="table-wrapper">
+        {/* === ERROR MESSAGE === */}
+        {error && (
+          <div style={{ 
+            backgroundColor: '#fee', 
+            color: '#c33', 
+            padding: '12px', 
+            borderRadius: '8px', 
+            marginBottom: '15px',
+            borderLeft: '4px solid #c33'
+          }}>
+            <strong>Error: </strong> {error}
+          </div>
+        )}
+
+        <div className="table-wrapper" style={{ overflowX: 'auto' }}>
           {showGroupLeaderTable ? (
-            <table className="status-table">
+            <table className="status-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem' }}>
               <thead>
                 <tr>
-                  <th rowSpan={2} className="col-no">NO</th>
-                  <th rowSpan={2} className="col-checkpoint">CHECK POINT</th>
-                  <th rowSpan={2} className="col-shift">SHIFT</th>
-                  <th rowSpan={2} className="col-waktu">WAKTU CHECK</th>
-                  <th rowSpan={2} className="col-standard">STANDARD / METODE</th>
-                  <th colSpan={dynamicDates.length} className="month-header">{getMonthName(activeMonth)} {activeYear}</th>
+                  <th rowSpan={2} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center', minWidth: '40px' }}>NO</th>
+                  <th rowSpan={2} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center', minWidth: '280px' }}>CHECK POINT</th>
+                  <th rowSpan={2} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center', minWidth: '45px' }}>SHIFT</th>
+                  <th rowSpan={2} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center', minWidth: '90px' }}>WAKTU CHECK</th>
+                  <th rowSpan={2} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center', minWidth: '90px' }}>STANDARD / METODE</th>
+                  <th colSpan={dynamicDates.length} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center', backgroundColor: '#e3f2fd', fontWeight: 'bold', fontSize: '1rem' }}>
+                    {getMonthName(activeMonth)} {activeYear}
+                  </th>
                 </tr>
                 <tr>
                   {dynamicDates.map((date) => (
-                    <th key={date} className={`col-date ${isCurrentMonth && date === today ? "col-date-today" : ""}`}>
+                    <th 
+                      key={date} 
+                      style={{ 
+                        border: '1px solid #000', 
+                        padding: '6px 4px', 
+                        textAlign: 'center', 
+                        minWidth: '32px',
+                        backgroundColor: isCurrentMonth && date === today ? '#fff8e1' : 'inherit',
+                        color: isCurrentMonth && date === today ? '#e65100' : 'inherit',
+                        fontWeight: isCurrentMonth && date === today ? 'bold' : 'normal'
+                      }}
+                    >
                       {date}
                     </th>
                   ))}
@@ -1392,140 +1508,167 @@ export default function FinalAssyStatusPage() {
               </thead>
               <tbody>
                 {checkpoints.map((cp) => {
-                  const currentNo = cp.no
-                  const sameNoItems = checkpoints.filter(c => c.no === currentNo)
-                  const isFirstOfGroup = sameNoItems[0].id === cp.id
+                  const currentNo = cp.no;
+                  const sameNoItems = checkpoints.filter(c => c.no === currentNo);
+                  const isFirstOfGroup = sameNoItems[0].id === cp.id;
                   const groupRowSpan = sameNoItems.reduce((sum, item) => {
-                    return sum + item.shifts.filter(s => s.waktuCheck !== " ").length
-                  }, 0)
+                    return sum + item.shifts.filter(s => s.waktuCheck !== "").length;
+                  }, 0);
 
                   if (cp.type === "special") {
                     return (
                       <tr key={`cp-${cp.id}`}>
-                        <td className="col-no"></td>
-                        <td className="col-checkpoint" colSpan={3}>{cp.checkPoint}</td>
-                        <td className="col-standard">{cp.standard}</td>
+                        <td style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}></td>
+                        <td colSpan={3} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'left' }}>{cp.checkPoint}</td>
+                        <td style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>{cp.standard}</td>
                         {dynamicDates.map((date) => {
-                          const esoText = renderESOCell(date, "A")
+                          const esoText = renderESOCell(date, "A");
                           return (
                             <td
                               key={date}
-                              className={`col-date ${isCurrentMonth && date === today ? "bg-blue-50" : ""} ${esoText !== "CHECK" && esoText !== "-" ? "bg-yellow-100" : ""}`}
+                              style={{ 
+                                border: '1px solid #000', 
+                                padding: '6px 4px',  
+                                textAlign: 'center',
+                                backgroundColor: isCurrentMonth && date === today ? '#e3f2fd' : 'inherit'
+                              }}
                             >
                               {esoText}
                             </td>
-                          )
+                          );
                         })}
                       </tr>
-                    )
+                    );
                   }
 
                   if (cp.type === "weekly" && cp.id === 14) {
                     return (
                       <React.Fragment key={`cp-${cp.id}`}>
                         <tr key={`${cp.id}-header`}>
-                          {isFirstOfGroup && <td className="col-no" rowSpan={3}>{cp.no}</td>}
-                          <td className="col-checkpoint" rowSpan={3}>{cp.checkPoint}</td>
-                          <td className="col-shift"></td>
-                          <td className="col-waktu"></td>
-                          {isFirstOfGroup && <td className="col-standard" rowSpan={3}>{cp.standard}</td>}
+                          {isFirstOfGroup && <td rowSpan={3} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>{cp.no}</td>}
+                          <td rowSpan={3} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'left' }}>{cp.checkPoint}</td>
+                          <td style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}></td>
+                          <td style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}></td>
+                          {isFirstOfGroup && <td rowSpan={3} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>{cp.standard}</td>}
                           {dynamicDates.map((date) => {
-                            const weeklyText = renderWeeklyAssignment(date)
+                            const weeklyText = renderWeeklyAssignment(date);
                             return (
-                              <td key={date} className={`col-date ${isCurrentMonth && date === today ? "bg-blue-50" : ""}`}>
+                              <td key={date} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>
                                 {weeklyText}
                               </td>
-                            )
+                            );
                           })}
                         </tr>
                         <tr key={`${cp.id}-A`}>
-                          <td className="col-shift">A</td>
-                          <td className="col-waktu">{cp.shifts[0].waktuCheck}</td>
+                          <td style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>A</td>
+                          <td style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>{cp.shifts[0].waktuCheck}</td>
                           {dynamicDates.map((date) => (
                             <td
                               key={date}
-                              className={`col-date ${isCurrentMonth && date === today ? "bg-blue-50" : ""} ${!isCheckDate(cp, "A", date) ? "bg-gray-200" : ""}`}
+                              style={{ 
+                                border: '1px solid #000', 
+                                padding: '6px 4px',  
+                                textAlign: 'center',
+                                backgroundColor: isCurrentMonth && date === today ? '#e3f2fd' : 'inherit'
+                              }}
                             >
                               {renderStatusCell(date, cp, "A")}
                             </td>
                           ))}
                         </tr>
                         <tr key={`${cp.id}-B`}>
-                          <td className="col-shift">B</td>
-                          <td className="col-waktu">{cp.shifts[1].waktuCheck}</td>
+                          <td style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>B</td>
+                          <td style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>{cp.shifts[1].waktuCheck}</td>
                           {dynamicDates.map((date) => (
                             <td
                               key={date}
-                              className={`col-date ${isCurrentMonth && date === today ? "bg-blue-50" : ""} ${!isCheckDate(cp, "B", date) ? "bg-gray-200" : ""}`}
+                              style={{ 
+                                border: '1px solid #000', 
+                                padding: '6px 4px',  
+                                textAlign: 'center',
+                                backgroundColor: isCurrentMonth && date === today ? '#e3f2fd' : 'inherit'
+                              }}
                             >
                               {renderStatusCell(date, cp, "B")}
                             </td>
                           ))}
                         </tr>
                       </React.Fragment>
-                    )
+                    );
                   }
 
                   return (
                     <React.Fragment key={`cp-${cp.id}`}>
                       {cp.shifts.map((shiftData, shiftIdx) => {
-                        if (shiftData.waktuCheck === " ") return null
+                        if (shiftData.waktuCheck === "") return null;
                         return (
                           <tr key={`${cp.id}-${shiftIdx}`}>
                             {shiftIdx === 0 && isFirstOfGroup && (
-                              <td className="col-no" rowSpan={groupRowSpan}>{cp.no}</td>
+                              <td rowSpan={groupRowSpan} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>{cp.no}</td>
                             )}
                             {shiftIdx === 0 && (
                               <td
-                                className="col-checkpoint"
-                                rowSpan={cp.shifts.filter(s => s.waktuCheck !== " ").length}
+                                rowSpan={cp.shifts.filter(s => s.waktuCheck !== "").length}
+                                style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'left' }}
                               >
                                 {cp.checkPoint}
                               </td>
                             )}
-                            <td className="col-shift">{shiftData.shift}</td>
-                            <td className="col-waktu">{shiftData.waktuCheck}</td>
+                            <td style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>{shiftData.shift}</td>
+                            <td style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>{shiftData.waktuCheck}</td>
                             {shiftIdx === 0 && isFirstOfGroup && (
-                              <td className="col-standard" rowSpan={groupRowSpan}>{cp.standard}</td>
+                              <td rowSpan={groupRowSpan} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>{cp.standard}</td>
                             )}
                             {dynamicDates.map((date) => (
                               <td
                                 key={date}
-                                className={`col-date ${isCurrentMonth && date === today ? "bg-blue-50" : ""} ${!isCheckDate(cp, shiftData.shift, date) ? "bg-gray-200" : ""}`}
+                                style={{ 
+                                  border: '1px solid #000', 
+                                  padding: '6px 4px', 
+                                  textAlign: 'center',
+                                  backgroundColor: isCurrentMonth && date === today ? '#e3f2fd' : 'inherit'
+                                }}
                               >
                                 {renderStatusCell(date, cp, shiftData.shift)}
                               </td>
                             ))}
                           </tr>
-                        )
+                        );
                       })}
                     </React.Fragment>
-                  )
+                  );
                 })}
-
                 <tr>
-                  <td className="col-no"></td>
-                  <td className="col-checkpoint" colSpan={4}>Tanda tangan GL Inspector</td>
+                  <td style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}></td>
+                  <td colSpan={4} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>Tanda tangan GL Inspector</td>
                   {dynamicDates.map((date) => {
-                    const signatureStatus = getGLSignature(date, "A", "group-leader")
+                    const signatureStatus = getGLSignature(date, "A", "group-leader");
                     const getBgColor = (status: string) => {
-                      if (status === "OK") return "#4caf50"
-                      if (status === "NG") return "#f44336"
-                      return "#9e9e9e"
-                    }
+                      if (status === "OK") return "#4caf50";
+                      if (status === "NG") return "#f44336";
+                      return "#9e9e9e";
+                    };
                     return (
-                      <td key={date} className={`col-date ${isCurrentMonth && date === today ? "bg-blue-50" : ""}`}>
+                      <td key={date} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>
                         <select
-                          className="status-dropdown"
-                          style={{ backgroundColor: getBgColor(signatureStatus), color: "white" }}
+                          style={{ 
+                            backgroundColor: getBgColor(signatureStatus), 
+                            color: "white",
+                            width: '100%',
+                            border: 'none',
+                            padding: '4px 8px',
+                            borderRadius: '4px',
+                            fontWeight: 'bold'
+                          }}
                           value={signatureStatus}
                           onChange={(e) => handleGLSignatureChange(date, "A", e.target.value as "-" | "OK" | "NG", "group-leader")}
                         >
                           <option value="-">-</option>
                           <option value="OK">✓ OK</option>
+                          <option value="NG">✗ NG</option>
                         </select>
                       </td>
-                    )
+                    );
                   })}
                 </tr>
               </tbody>
@@ -1540,7 +1683,9 @@ export default function FinalAssyStatusPage() {
                   <th rowSpan={2} className="col-metode">METODE CHECK</th>
                   <th colSpan={5} className="col-area">AREA</th>
                   <th rowSpan={2} className="col-shift">SHIFT</th>
-                  <th colSpan={dynamicDates.length} className="month-header">{getMonthName(activeMonth)} {activeYear}</th>
+                  <th colSpan={dynamicDates.length} className="month-header">
+                    {getMonthName(activeMonth)} {activeYear}
+                  </th>
                 </tr>
                 <tr>
                   <th className="col-wp-check">WP CHECK</th>
@@ -1549,7 +1694,10 @@ export default function FinalAssyStatusPage() {
                   <th className="col-visual-2">VISUAL 2</th>
                   <th className="col-double-check">DOUBLE CHECK (RI)</th>
                   {dynamicDates.map((date) => (
-                    <th key={date} className={`col-date ${isCurrentMonth && date === today ? "col-date-today" : ""}`}>
+                    <th 
+                      key={date} 
+                      className={`col-date ${isCurrentMonth && date === today ? "col-date-today" : ""}`}
+                    >
                       {date}
                     </th>
                   ))}
@@ -1564,102 +1712,155 @@ export default function FinalAssyStatusPage() {
                     return groups
                   }, {} as Record<string, InspectorCheckItem[]>)
                 ).map(([no, items]) => {
-                  const totalRows = items.length * 2
-                  return (
-                    <React.Fragment key={no}>
-                      {items.map((item, itemIdx) => {
-                        let itemCheckCount = 1
-                        let nextIdx = itemIdx + 1
-                        while (nextIdx < items.length && items[nextIdx].itemCheck === item.itemCheck) {
-                          itemCheckCount++
-                          nextIdx++
-                        }
+                  return items.map((item, itemIdx) => {
+                    // Hitung berapa banyak checkpoint yang sama untuk itemCheck ini
+                    let itemCheckCount = 1
+                    let nextIdx = itemIdx + 1
+                    while (nextIdx < items.length && items[nextIdx].itemCheck === item.itemCheck) {
+                      itemCheckCount++
+                      nextIdx++
+                    }
 
-                        let checkPointCount = 1
-                        let nextCheckIdx = itemIdx + 1
-                        while (nextCheckIdx < items.length && items[nextCheckIdx].checkPoint === item.checkPoint) {
-                          checkPointCount++
-                          nextCheckIdx++
-                        }
+                    // Hitung berapa banyak checkpoint yang sama
+                    let checkPointCount = 1
+                    let nextCheckIdx = itemIdx + 1
+                    while (nextCheckIdx < items.length && items[nextCheckIdx].checkPoint === item.checkPoint) {
+                      checkPointCount++
+                      nextCheckIdx++
+                    }
 
-                        const itemCheckRows = itemCheckCount * 2
-                        const checkPointRows = checkPointCount * 2
+                    const itemCheckRows = itemCheckCount * 2 // x2 karena ada shift A dan B
+                    const checkPointRows = checkPointCount * 2
 
-                        return (
-                          <React.Fragment key={`item-${item.id}`}>
-                            {item.shifts.map((shiftData, shiftIdx) => (
-                              <tr key={`${item.id}-${shiftIdx}`}>
-                                {itemIdx === 0 && shiftIdx === 0 && (
-                                  <td className="col-no" rowSpan={totalRows}>{no}</td>
-                                )}
-                                {shiftIdx === 0 && itemIdx === 0 && (
-                                  <td className="col-item-check" rowSpan={itemCheckRows}>{item.itemCheck}</td>
-                                )}
-                                {shiftIdx === 0 && itemIdx > 0 && items[itemIdx - 1].itemCheck !== item.itemCheck && (
-                                  <td className="col-item-check" rowSpan={itemCheckRows}>{item.itemCheck}</td>
-                                )}
-                                {shiftIdx === 0 && itemIdx === 0 && (
-                                  <td className="col-checkpoint" rowSpan={checkPointRows}>{item.checkPoint}</td>
-                                )}
-                                {shiftIdx === 0 && itemIdx > 0 && items[itemIdx - 1].checkPoint !== item.checkPoint && (
-                                  <td className="col-checkpoint" rowSpan={checkPointRows}>{item.checkPoint}</td>
-                                )}
-                                {shiftIdx === 0 && <td className="col-metode" rowSpan={2}>{item.metodeCheck}</td>}
-                                {itemIdx === 0 && shiftIdx === 0 && (
-                                  <>
-                                    <td className="col-wp-check" rowSpan={itemCheckRows}>
-                                      {shouldShowIcon(item, "wp-check") ? "O" : " "}
-                                    </td>
-                                    <td className="col-checker" rowSpan={itemCheckRows}>
-                                      {shouldShowIcon(item, "checker") ? "O" : " "}
-                                    </td>
-                                    <td className="col-visual-1" rowSpan={itemCheckRows}>
-                                      {shouldShowIcon(item, "visual-1") ? "O" : " "}
-                                    </td>
-                                    <td className="col-visual-2" rowSpan={itemCheckRows}>
-                                      {shouldShowIcon(item, "visual-2") ? "O" : " "}
-                                    </td>
-                                    <td className="col-double-check" rowSpan={itemCheckRows}>
-                                      {shouldShowIcon(item, "double-check") ? "O" : " "}
-                                    </td>
-                                  </>
-                                )}
-                                <td className="col-shift">{shiftData.shift}</td>
-                                {dynamicDates.map((date) => (
-                                  <td
-                                    key={date}
-                                    className={`col-date ${isCurrentMonth && date === today ? "bg-blue-50" : ""} ${!isCheckDate(item, shiftData.shift, date) ? "bg-gray-200" : ""}`}
-                                  >
-                                    {renderInspectorStatusCell(date, item.id, shiftData.shift)}
-                                  </td>
-                                ))}
-                              </tr>
-                            ))}
-                          </React.Fragment>
-                        )
-                      })}
-                    </React.Fragment>
-                  )
+                    return (
+                      <React.Fragment key={`item-${item.id}`}>
+                        {/* Row untuk Shift A */}
+                        <tr>
+                          {/* NO - hanya tampil di row pertama dari grup NO yang sama */}
+                          {itemIdx === 0 && (
+                            <td 
+                              className="col-no" 
+                              rowSpan={items.length * 2}
+                            >
+                              {no}
+                            </td>
+                          )}
+
+                          {/* ITEM CHECK - tampil dengan rowspan */}
+                          {(itemIdx === 0 || items[itemIdx - 1].itemCheck !== item.itemCheck) && (
+                            <td 
+                              className="col-item-check" 
+                              rowSpan={itemCheckRows}
+                            >
+                              {item.itemCheck}
+                            </td>
+                          )}
+
+                          {/* CHECK POINT - tampil dengan rowspan */}
+                          {(itemIdx === 0 || items[itemIdx - 1].checkPoint !== item.checkPoint) && (
+                            <td 
+                              className="col-checkpoint" 
+                              rowSpan={checkPointRows}
+                            >
+                              {item.checkPoint}
+                            </td>
+                          )}
+
+                          {/* METODE CHECK - tampil dengan rowspan 2 (untuk A & B) */}
+                          <td className="col-metode" rowSpan={2}>
+                            {item.metodeCheck}
+                          </td>
+
+                          {/* AREA ICONS - tampil dengan rowspan sesuai itemCheck */}
+                          {(itemIdx === 0 || items[itemIdx - 1].itemCheck !== item.itemCheck) && (
+                            <>
+                              <td className="col-wp-check" rowSpan={itemCheckRows}>
+                                {shouldShowIcon(item, "wp-check") ? "O" : ""}
+                              </td>
+                              <td className="col-checker" rowSpan={itemCheckRows}>
+                                {shouldShowIcon(item, "checker") ? "O" : ""}
+                              </td>
+                              <td className="col-visual-1" rowSpan={itemCheckRows}>
+                                {shouldShowIcon(item, "visual-1") ? "O" : ""}
+                              </td>
+                              <td className="col-visual-2" rowSpan={itemCheckRows}>
+                                {shouldShowIcon(item, "visual-2") ? "O" : ""}
+                              </td>
+                              <td className="col-double-check" rowSpan={itemCheckRows}>
+                                {shouldShowIcon(item, "double-check") ? "O" : ""}
+                              </td>
+                            </>
+                          )}
+
+                          {/* SHIFT A */}
+                          <td className="col-shift">A</td>
+
+                          {/* DATA CELLS untuk Shift A */}
+                          {dynamicDates.map((date) => (
+                            <td
+                              key={date}
+                              className={`col-date ${
+                                isCurrentMonth && date === today ? "bg-blue-50" : ""
+                              } ${!isCheckDate(item, "A", date) ? "bg-gray-200" : ""}`}
+                            >
+                              {renderInspectorStatusCell(date, item.id, "A")}
+                            </td>
+                          ))}
+                        </tr>
+
+                        {/* Row untuk Shift B */}
+                        <tr>
+                          {/* SHIFT B */}
+                          <td className="col-shift">B</td>
+
+                          {/* DATA CELLS untuk Shift B */}
+                          {dynamicDates.map((date) => (
+                            <td
+                              key={date}
+                              className={`col-date ${
+                                isCurrentMonth && date === today ? "bg-blue-50" : ""
+                              } ${!isCheckDate(item, "B", date) ? "bg-gray-200" : ""}`}
+                            >
+                              {renderInspectorStatusCell(date, item.id, "B")}
+                            </td>
+                          ))}
+                        </tr>
+                      </React.Fragment>
+                    )
+                  })
                 })}
 
+                {/* ✅ SIGNATURE ROWS - GROUP LEADER BISA EDIT, INSPECTOR TIDAK */}
                 <tr>
-                  <td style={{ border: "none" }} rowSpan={2} colSpan={5} className="special-row"></td>
-                  <td rowSpan={2} className="col-wp-check" colSpan={4}>SIGN / CHECK OLEH GL INSPECTOR</td>
+                  <td style={{ border: "none" }} rowSpan={2} colSpan={5}></td>
+                  <td rowSpan={2} colSpan={4} className="col-wp-check">
+                    SIGN / CHECK OLEH GL INSPECTOR
+                  </td>
                   <td className="col-shift">A</td>
                   {dynamicDates.map((date) => {
-                    const signatureStatus = getGLSignature(date, "A", "inspector")
+                    const signatureStatus = getGLSignature(date, "A", "inspector");
                     const getBgColor = (status: string) => {
-                      if (status === "OK") return "#4caf50"
-                      return "#9e9e9e"
-                    }
+                      if (status === "OK") return "#4caf50";
+                      return "#9e9e9e";
+                    };
                     return (
-                      <td key={date} className={`col-date ${isCurrentMonth && date === today ? "bg-blue-50" : ""}`}>
+                      <td 
+                        key={date} 
+                        className={`col-date ${isCurrentMonth && date === today ? "bg-blue-50" : ""}`}
+                      >
                         <select
                           className="status-dropdown"
                           style={{ backgroundColor: getBgColor(signatureStatus), color: "white" }}
                           value={signatureStatus}
-                          disabled={isInspector}
-                          onChange={(e) => handleGLSignatureChange(date, "A", e.target.value as "-" | "OK" | "NG", "inspector")}
+                          disabled={!hasPermission.canEditSignature} // ✅ Hanya group-leader yang bisa edit
+                          onChange={(e) =>
+                            handleGLSignatureChange(
+                              date,
+                              "A",
+                              e.target.value as "-" | "OK" | "NG",
+                              "inspector"
+                            )
+                          }
                         >
                           <option value="-">-</option>
                           <option value="OK">✓ OK</option>
@@ -1671,20 +1872,30 @@ export default function FinalAssyStatusPage() {
                 <tr>
                   <td className="col-shift">B</td>
                   {dynamicDates.map((date) => {
-                    const signatureStatus = getGLSignature(date, "B", "inspector")
+                    const signatureStatus = getGLSignature(date, "B", "inspector");
                     const getBgColor = (status: string) => {
-                      if (status === "OK") return "#4caf50"
-                      if (status === "NG") return "#f44336"
-                      return "#9e9e9e"
-                    }
+                      if (status === "OK") return "#4caf50";
+                      if (status === "NG") return "#f44336";
+                      return "#9e9e9e";
+                    };
                     return (
-                      <td key={date} className={`col-date ${isCurrentMonth && date === today ? "bg-blue-50" : ""}`}>
+                      <td 
+                        key={date} 
+                        className={`col-date ${isCurrentMonth && date === today ? "bg-blue-50" : ""}`}
+                      >
                         <select
                           className="status-dropdown"
                           style={{ backgroundColor: getBgColor(signatureStatus), color: "white" }}
                           value={signatureStatus}
-                          disabled={isInspector}
-                          onChange={(e) => handleGLSignatureChange(date, "B", e.target.value as "-" | "OK" | "NG", "inspector")}
+                          disabled={!hasPermission.canEditSignature} // ✅ Hanya group-leader yang bisa edit
+                          onChange={(e) =>
+                            handleGLSignatureChange(
+                              date,
+                              "B",
+                              e.target.value as "-" | "OK" | "NG",
+                              "inspector"
+                            )
+                          }
                         >
                           <option value="-">-</option>
                           <option value="OK">✓ OK</option>
@@ -1700,152 +1911,106 @@ export default function FinalAssyStatusPage() {
         </div>
       </div>
 
+      {/* MODALS */}
       {ngModal && (
-        <div className="ng-modal-overlay">
-          <div className="ng-modal">
-            <h3>Edit Laporan Kondisi NG</h3>
-            <div className="ng-form-group">
-              <label>Keterangan NG:</label>
+        <div style={{ 
+          position: 'fixed', 
+          top: 0, 
+          left: 0, 
+          width: '100%', 
+          height: '100%', 
+          backgroundColor: 'rgba(0,0,0,0.5)', 
+          display: 'flex', 
+          justifyContent: 'center', 
+          alignItems: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{ 
+            backgroundColor: 'white', 
+            padding: '20px', 
+            borderRadius: '8px', 
+            width: '90%', 
+            maxWidth: '500px'
+          }}>
+            <h3 style={{ marginTop: 0, color: '#d32f2f' }}>Edit Laporan Kondisi NG</h3>
+            <div style={{ marginBottom: '15px' }}>
+              <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>Keterangan NG:</label>
               <textarea
                 value={ngModal.notes}
                 onChange={(e) => setNgModal({ ...ngModal, notes: e.target.value })}
                 rows={3}
                 placeholder="Deskripsikan kondisi NG..."
+                style={{ 
+                  width: '100%', 
+                  padding: '8px', 
+                  border: '1px solid #ccc', 
+                  borderRadius: '4px',
+                  fontSize: '14px'
+                }}
               />
             </div>
-            <div className="ng-form-group">
-              <label>Departemen Tujuan:</label>
+            <div style={{ marginBottom: '15px' }}>
+              <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>Departemen Tujuan:</label>
               <select
                 value={ngModal.department}
                 onChange={(e) => setNgModal({ ...ngModal, department: e.target.value })}
+                style={{ 
+                  width: '100%', 
+                  padding: '8px', 
+                  border: '1px solid #ccc',  
+                  borderRadius: '4px',
+                  fontSize: '14px'
+                }}
               >
                 {departments.map(dept => (
                   <option key={dept} value={dept}>{dept}</option>
                 ))}
               </select>
             </div>
-            <div className="ng-modal-actions">
-              <button onClick={() => setNgModal(null)}>Batal</button>
-              <button onClick={saveNgReport} className="btn-primary">Simpan</button>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button 
+                onClick={() => setNgModal(null)} 
+                style={{ 
+                  padding: '8px 16px', 
+                  backgroundColor: '#f5f5f5', 
+                  border: 'none', 
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '14px'
+                }}
+              >
+                Batal
+              </button>
+              <button 
+                onClick={saveNgReport} 
+                style={{ 
+                  padding: '8px 16px', 
+                  backgroundColor: '#1976d2', 
+                  color: 'white', 
+                  border: 'none', 
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '14px'
+                }}
+              >
+                Simpan
+              </button>
             </div>
           </div>
         </div>
       )}
 
-      <style jsx>{`
-        .header {
-          margin-bottom: 20px;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
+      <style jsx global>{`
+        @keyframes spin {
+          to { transform: rotate(360deg); }
         }
-        .role-info {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-        }
-        .role-badge {
-          background: #e3f2fd;
-          color: #1976d2;
-          padding: 6px 12px;
-          border-radius: 6px;
-          font-weight: 600;
-          font-size: 0.9rem;
-        }
-
-        .view-dropdown {
-          background-color: #1976d2;
-          color: white;
-          border: none;
-          border-radius: 6px;
-          padding: 6px 12px;
-          font-weight: 600;
-          font-size: 0.9rem;
-          cursor: pointer;
-          appearance: none;
-          background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3e%3cpath d='M7 10l5 5 5-5z'/%3e%3c/svg%3e");
-          background-repeat: no-repeat;
-          background-position: right 0.5rem center;
-          background-size: 16px;
-          padding-right: 28px;
-        }
-        .view-dropdown:focus {
-          outline: none;
-          box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.5);
-        }
-
-        .table-wrapper {
-          overflow-x: auto;
-          border-radius: 8px;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-        }
-        .status-table {
-          width: 100%;
-          border-collapse: collapse;
-          background: white;
-          font-size: 0.75rem;
-        }
-        .status-table th, .status-table td {
-          padding: 6px 4px;
-          text-align: center;
-          border: 1px solid #000;
-          vertical-align: middle;
-        }
-        .status-table th {
-          background: #e3f2fd;
-          font-weight: 600;
-        }
-        .month-header {
-          text-align: center;
-          font-size: 1rem;
-          font-weight: bold;
-          color: #0d47a1;
-          background: #e3f2fd;
-          padding: 10px 0;
-        }
-        .col-no { min-width: 40px; max-width: 50px; text-align: center; font-weight: 600; }
-        .col-item-check { min-width: 120px; max-width: 150px; text-align: left; padding-left: 8px; }
-        .col-checkpoint { min-width: 280px; max-width: 350px; text-align: left; padding-left: 8px; word-break: break-word; }
-        .col-metode, .col-waktu, .col-standard { min-width: 90px; max-width: 110px; font-size: 0.7rem; }
-        .col-area { min-width: 120px; max-width: 150px; font-size: 0.7rem; }
-        .col-shift { min-width: 45px; max-width: 50px; font-weight: 600; }
-        .col-date { min-width: 32px; max-width: 40px; text-align: center; font-size: 0.7rem; }
-        .col-date-today { background: #fff8e1 !important; color: #e65100; font-weight: 700; }
-        .bg-yellow-100 { background: #fff9c4; }
-        .bg-blue-50 { background: #e3f2fd; }
-        .bg-gray-200 { background-color: #e0e0e0 !important; color: #757575; }
-        .status-badge {
-          display: inline-block;
-          padding: 2px 6px;
-          border-radius: 3px;
-          font-size: 0.65rem;
-          font-weight: 600;
-          white-space: nowrap;
-        }
-        .status-badge-ok { background: #4caf50; color: white; }
-        .status-badge-ng { background: #f44336; color: white; cursor: pointer; }
-        .status-badge-check { background: #1e88e5; color: white; }
-
-        .col-wp-check,
-        .col-checker,
-        .col-visual-1,
-        .col-visual-2,
-        .col-double-check {
-          white-space: normal;
-          min-width: 80px;
-          max-width: 100px;
-          font-size: 0.7rem;
-          background-color: #e3f2fd;
-          font-weight: 600;
-        }
-
         .status-dropdown {
           width: 100%;
           padding: 2px 4px;
           font-size: 0.65rem;
           font-weight: 600;
           border: 1px solid #ccc;
-          border-radius: 3px;
+          borderRadius: 3px;
           cursor: pointer;
           text-align: center;
         }
@@ -1853,66 +2018,18 @@ export default function FinalAssyStatusPage() {
           cursor: not-allowed;
           opacity: 0.6;
         }
-
-        .ng-modal-overlay {
-          position: fixed;
-          top: 0;
-          left: 0;
-          width: 100%;
-          height: 100%;
-          background: rgba(0,0,0,0.5);
-          display: flex;
-          justify-content: center;
-          align-items: center;
-          z-index: 1000;
+        .bg-blue-50 {
+          background-color: #e3f2fd !important;
         }
-        .ng-modal {
-          background: white;
-          padding: 20px;
-          border-radius: 8px;
-          width: 90%;
-          max-width: 500px;
+        .bg-gray-200 {
+          background-color: #e0e0e0 !important;
         }
-        .ng-modal h3 {
-          margin-top: 0;
-          color: #d32f2f;
-        }
-        .ng-form-group {
-          margin-bottom: 15px;
-        }
-        .ng-form-group label {
-          display: block;
-          margin-bottom: 5px;
-          font-weight: 600;
-        }
-        .ng-form-group textarea,
-        .ng-form-group select {
-          width: 100%;
-          padding: 8px;
-          border: 1px solid #ccc;
-          border-radius: 4px;
-          font-size: 0.9rem;
-        }
-        .ng-modal-actions {
-          display: flex;
-          justify-content: flex-end;
-          gap: 10px;
-        }
-        .ng-modal-actions button {
-          padding: 8px 16px;
-          border: none;
-          border-radius: 4px;
-          cursor: pointer;
-        }
-        .ng-modal-actions button:first-child {
-          background: #f5f5f5;
-          color: #333;
-        }
-        .btn-primary {
-          background: #1976d2;
-          color: white;
+        .col-date-today {
+          background-color: #fff8e1 !important;
+          color: #e65100 !important;
+          font-weight: bold !important;
         }
       `}</style>
     </>
-  )
+  );
 }

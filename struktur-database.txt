@@ -1,0 +1,283 @@
+e_checksheet_qa=# \dt
+                  List of relations
+ Schema |           Name           | Type  |  Owner
+--------+--------------------------+-------+----------
+ public | checklist_areas          | table | postgres
+ public | checklist_categories     | table | postgres
+ public | checklist_history        | table | postgres
+ public | checklist_items          | table | postgres
+ public | checklist_results        | table | postgres
+ public | checklist_results_backup | table | postgres
+ public | checklist_signatures     | table | postgres
+ public | users                    | table | postgres
+(8 rows)
+
+
+e_checksheet_qa=# \d users;
+                                  Table "public.users"
+    Column     |            Type             | Collation | Nullable |      Default
+---------------+-----------------------------+-----------+----------+-------------------
+ id            | character varying(100)      |           | not null |
+ username      | character varying(50)       |           | not null |
+ full_name     | character varying(100)      |           | not null |
+ nik           | character varying(50)       |           | not null |
+ department    | character varying(50)       |           | not null |
+ role          | character varying(50)       |           | not null |
+ password_hash | character varying(255)      |           | not null |
+ is_active     | boolean                     |           |          | true
+ created_at    | timestamp without time zone |           |          | CURRENT_TIMESTAMP
+ updated_at    | timestamp without time zone |           |          | CURRENT_TIMESTAMP
+Indexes:
+    "users_pkey" PRIMARY KEY, btree (id)
+    "idx_users_department" btree (department)
+    "idx_users_nik" btree (nik)
+    "idx_users_role" btree (role)
+    "idx_users_username" btree (username)
+    "users_nik_key" UNIQUE CONSTRAINT, btree (nik)
+    "users_username_key" UNIQUE CONSTRAINT, btree (username)
+Check constraints:
+    "check_department" CHECK (department::text = ANY (ARRAY['quality-assurance'::character varying, 'admin'::character varying, 'k3'::character varying]::text[]))
+    "check_role" CHECK (role::text = ANY (ARRAY['group-leader-qa'::character varying, 'inspector-qa'::character varying, 'admin'::character varying, 'eso'::character varying]::text[]))
+Referenced by:
+    TABLE "checklist_results" CONSTRAINT "checklist_results_user_id_fkey" FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    TABLE "checklist_signatures" CONSTRAINT "checklist_signatures_user_id_fkey" FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+
+
+e_checksheet_qa=# \d checklist_areas;
+                                         Table "public.checklist_areas"
+   Column    |            Type             | Collation | Nullable |                   Default
+-------------+-----------------------------+-----------+----------+---------------------------------------------
+ id          | integer                     |           | not null | nextval('checklist_areas_id_seq'::regclass)
+ category_id | integer                     |           | not null |
+ area_name   | character varying(100)      |           | not null |
+ area_code   | character varying(50)       |           | not null |
+ description | text                        |           |          |
+ is_active   | boolean                     |           |          | true
+ sort_order  | integer                     |           |          | 0
+ created_at  | timestamp without time zone |           |          | CURRENT_TIMESTAMP
+ updated_at  | timestamp without time zone |           |          | CURRENT_TIMESTAMP
+Indexes:
+    "checklist_areas_pkey" PRIMARY KEY, btree (id)
+    "idx_areas_category" btree (category_id)
+    "idx_areas_code" btree (area_code)
+    "unique_category_area" UNIQUE CONSTRAINT, btree (category_id, area_code)
+Foreign-key constraints:
+    "checklist_areas_category_id_fkey" FOREIGN KEY (category_id) REFERENCES checklist_categories(id) ON DELETE CASCADE
+Referenced by:
+    TABLE "checklist_items" CONSTRAINT "checklist_items_area_id_fkey" FOREIGN KEY (area_id) REFERENCES checklist_areas(id) ON DELETE SET NULL
+    TABLE "checklist_results" CONSTRAINT "checklist_results_area_id_fkey" FOREIGN KEY (area_id) REFERENCES checklist_areas(id) ON DELETE SET NULL
+
+
+e_checksheet_qa=# \d checklist_categories;
+                                          Table "public.checklist_categories"
+    Column     |            Type             | Collation | Nullable |                     Default
+---------------+-----------------------------+-----------+----------+--------------------------------------------------
+ id            | integer                     |           | not null | nextval('checklist_categories_id_seq'::regclass)
+ category_name | character varying(100)      |           | not null |
+ category_code | character varying(50)       |           | not null |
+ table_type    | table_type_enum             |           | not null |
+ area_type     | area_type_enum              |           | not null |
+ is_active     | boolean                     |           |          | true
+ sort_order    | integer                     |           |          | 0
+ created_at    | timestamp without time zone |           |          | CURRENT_TIMESTAMP
+Indexes:
+    "checklist_categories_pkey" PRIMARY KEY, btree (id)
+    "checklist_categories_category_code_key" UNIQUE CONSTRAINT, btree (category_code)
+    "checklist_categories_category_name_key" UNIQUE CONSTRAINT, btree (category_name)
+    "idx_area" btree (area_type)
+    "idx_code" btree (category_code)
+    "idx_type" btree (table_type)
+Referenced by:
+    TABLE "checklist_areas" CONSTRAINT "checklist_areas_category_id_fkey" FOREIGN KEY (category_id) REFERENCES checklist_categories(id) ON DELETE CASCADE
+    TABLE "checklist_items" CONSTRAINT "checklist_items_category_id_fkey" FOREIGN KEY (category_id) REFERENCES checklist_categories(id) ON DELETE CASCADE
+    TABLE "checklist_results" CONSTRAINT "checklist_results_category_id_fkey" FOREIGN KEY (category_id) REFERENCES checklist_categories(id) ON DELETE CASCADE
+    TABLE "checklist_signatures" CONSTRAINT "checklist_signatures_category_id_fkey" FOREIGN KEY (category_id) REFERENCES checklist_categories(id) ON DELETE CASCADE
+
+
+e_checksheet_qa=# \d checklist_history;
+                                         Table "public.checklist_history"
+   Column    |            Type             | Collation | Nullable |                    Default
+-------------+-----------------------------+-----------+----------+-----------------------------------------------
+ id          | integer                     |           | not null | nextval('checklist_history_id_seq'::regclass)
+ user_id     | character varying(100)      |           | not null |
+ nik         | character varying(50)       |           | not null |
+ category_id | integer                     |           | not null |
+ item_id     | integer                     |           | not null |
+ date_key    | character varying(10)       |           | not null |
+ shift       | shift_enum                  |           | not null |
+ time_slot   | character varying(50)       |           |          |
+ old_status  | character varying(10)       |           |          |
+ new_status  | character varying(10)       |           |          |
+ action_type | character varying(20)       |           |          |
+ changed_at  | timestamp without time zone |           |          | CURRENT_TIMESTAMP
+Indexes:
+    "checklist_history_pkey" PRIMARY KEY, btree (id)
+    "idx_lookup" btree (date_key, category_id, item_id)
+
+
+e_checksheet_qa=# \d checklist_items;
+                                             Table "public.checklist_items"
+        Column        |            Type             | Collation | Nullable |                   Default
+----------------------+-----------------------------+-----------+----------+---------------------------------------------
+ id                   | integer                     |           | not null | nextval('checklist_items_id_seq'::regclass)
+ category_id          | integer                     |           | not null |
+ item_no              | character varying(10)       |           |          |
+ check_point          | text                        |           | not null |
+ standard             | text                        |           |          |
+ waktu_check          | character varying(100)      |           |          |
+ shift                | shift_enum                  |           | not null |
+ machine              | character varying(100)      |           |          |
+ kind                 | character varying(100)      |           |          |
+ size                 | character varying(20)       |           |          |
+ item_check           | character varying(255)      |           |          |
+ method               | character varying(100)      |           |          |
+ area_tensile         | boolean                     |           |          | false
+ area_cross_section   | boolean                     |           |          | false
+ area_cutting         | boolean                     |           |          | false
+ area_pa              | boolean                     |           |          | false
+ schedule             | character varying(100)      |           |          |
+ tool_type            | character varying(100)      |           |          |
+ control_no           | character varying(50)       |           |          |
+ item_check_desc      | character varying(255)      |           |          |
+ frequency            | character varying(50)       |           |          |
+ judge                | character varying(50)       |           |          |
+ metode_check         | character varying(100)      |           |          |
+ area                 | character varying(100)      |           |          |
+ show_in_wp_check     | boolean                     |           |          | false
+ show_in_checker      | boolean                     |           |          | false
+ show_in_visual_1     | boolean                     |           |          | false
+ show_in_visual_2     | boolean                     |           |          | false
+ show_in_double_check | boolean                     |           |          | false
+ is_active            | boolean                     |           |          | true
+ sort_order           | integer                     |           |          | 0
+ created_at           | timestamp without time zone |           |          | CURRENT_TIMESTAMP
+ updated_at           | timestamp without time zone |           |          | CURRENT_TIMESTAMP
+ area_id              | integer                     |           |          |
+Indexes:
+    "checklist_items_pkey" PRIMARY KEY, btree (id)
+    "idx_active" btree (is_active)
+    "idx_category" btree (category_id)
+    "idx_items_area" btree (area_id)
+    "idx_shift" btree (shift)
+Foreign-key constraints:
+    "checklist_items_area_id_fkey" FOREIGN KEY (area_id) REFERENCES checklist_areas(id) ON DELETE SET NULL
+    "checklist_items_category_id_fkey" FOREIGN KEY (category_id) REFERENCES checklist_categories(id) ON DELETE CASCADE
+Referenced by:
+    TABLE "checklist_results" CONSTRAINT "checklist_results_item_id_fkey" FOREIGN KEY (item_id) REFERENCES checklist_items(id) ON DELETE CASCADE
+
+
+e_checksheet_qa=# \d checklist_results;
+                                          Table "public.checklist_results"
+     Column     |            Type             | Collation | Nullable |                    Default
+----------------+-----------------------------+-----------+----------+-----------------------------------------------
+ id             | integer                     |           | not null | nextval('checklist_results_id_seq'::regclass)
+ user_id        | character varying(100)      |           | not null |
+ nik            | character varying(50)       |           | not null |
+ category_id    | integer                     |           | not null |
+ item_id        | integer                     |           | not null |
+ date_key       | character varying(10)       |           | not null |
+ shift          | shift_enum                  |           | not null |
+ time_slot      | character varying(50)       |           | not null | ''::character varying
+ status         | status_enum                 |           | not null | '-'::status_enum
+ ng_description | text                        |           |          |
+ ng_department  | character varying(50)       |           |          |
+ submitted_at   | timestamp without time zone |           |          | CURRENT_TIMESTAMP
+ created_at     | timestamp without time zone |           |          | CURRENT_TIMESTAMP
+ updated_at     | timestamp without time zone |           |          | CURRENT_TIMESTAMP
+ area_id        | integer                     |           |          |
+Indexes:
+    "checklist_results_pkey" PRIMARY KEY, btree (id)
+    "idx_category_date" btree (category_id, date_key)
+    "idx_date_status" btree (date_key, status)
+    "idx_results_area" btree (area_id)
+    "idx_results_area_lookup" btree (category_id, area_id, date_key)
+    "idx_user_date" btree (user_id, date_key)
+    "unique_result_per_area_fixed" UNIQUE, btree (user_id, category_id, item_id, date_key, shift, time_slot, COALESCE(area_id, '-1'::integer))
+Foreign-key constraints:
+    "checklist_results_area_id_fkey" FOREIGN KEY (area_id) REFERENCES checklist_areas(id) ON DELETE SET NULL
+    "checklist_results_category_id_fkey" FOREIGN KEY (category_id) REFERENCES checklist_categories(id) ON DELETE CASCADE
+    "checklist_results_item_id_fkey" FOREIGN KEY (item_id) REFERENCES checklist_items(id) ON DELETE CASCADE
+    "checklist_results_user_id_fkey" FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+
+
+e_checksheet_qa=# \d checklist_signatures;
+                                           Table "public.checklist_signatures"
+      Column      |            Type             | Collation | Nullable |                     Default
+------------------+-----------------------------+-----------+----------+--------------------------------------------------
+ id               | integer                     |           | not null | nextval('checklist_signatures_id_seq'::regclass)
+ user_id          | character varying(100)      |           | not null |
+ nik              | character varying(50)       |           | not null |
+ category_id      | integer                     |           | not null |
+ date_key         | character varying(10)       |           | not null |
+ shift            | shift_enum                  |           | not null |
+ signature_status | signature_status_enum       |           | not null | '-'::signature_status_enum
+ signed_at        | timestamp without time zone |           |          | CURRENT_TIMESTAMP
+ created_at       | timestamp without time zone |           |          | CURRENT_TIMESTAMP
+ updated_at       | timestamp without time zone |           |          | CURRENT_TIMESTAMP
+Indexes:
+    "checklist_signatures_pkey" PRIMARY KEY, btree (id)
+    "idx_date" btree (date_key)
+    "idx_user_category" btree (user_id, category_id)
+    "unique_signature" UNIQUE CONSTRAINT, btree (user_id, category_id, date_key, shift)
+Foreign-key constraints:
+    "checklist_signatures_category_id_fkey" FOREIGN KEY (category_id) REFERENCES checklist_categories(id) ON DELETE CASCADE
+    "checklist_signatures_user_id_fkey" FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+
+
+e_checksheet_qa=# select * from chehcklist_areas;
+ERROR:  relation "chehcklist_areas" does not exist
+LINE 1: select * from chehcklist_areas;
+                      ^
+e_checksheet_qa=# select * from checklist_areas;
+ id | category_id |        area_name        |        area_code        |          description          | is_active | sort_order |         created_at         |         updated_at
+----+-------------+-------------------------+-------------------------+-------------------------------+-----------+------------+----------------------------+----------------------------
+  1 |           1 | Line A - Final Assembly | final-assy-gl-line-a    | Area produksi Line A          | t         |          1 | 2026-02-23 07:24:41.811875 | 2026-02-23 07:24:41.811875
+  2 |           1 | Line B - Final Assembly | final-assy-gl-line-b    | Area produksi Line B          | t         |          2 | 2026-02-23 07:24:41.811875 | 2026-02-23 07:24:41.811875
+  3 |           1 | Rework Station          | final-assy-gl-rework    | Area perbaikan & rework       | t         |          3 | 2026-02-23 07:24:41.811875 | 2026-02-23 07:24:41.811875
+  4 |           1 | Packing Area            | final-assy-gl-packing   | Area packing & shipping       | t         |          4 | 2026-02-23 07:24:41.811875 | 2026-02-23 07:24:41.811875
+  5 |           2 | Checker Station         | final-assy-insp-checker | Station pemeriksaan Checker   | t         |          1 | 2026-02-23 07:24:41.861687 | 2026-02-23 07:24:41.861687
+  6 |           2 | Visual 1 Station        | final-assy-insp-visual1 | Station inspeksi Visual 1     | t         |          2 | 2026-02-23 07:24:41.861687 | 2026-02-23 07:24:41.861687
+  7 |           2 | Visual 2 Station        | final-assy-insp-visual2 | Station inspeksi Visual 2     | t         |          3 | 2026-02-23 07:24:41.861687 | 2026-02-23 07:24:41.861687
+  8 |           2 | Double Check / RI       | final-assy-insp-ri      | Station Receiving Inspection  | t         |          4 | 2026-02-23 07:24:41.861687 | 2026-02-23 07:24:41.861687
+  9 |           3 | Crimping Area           | pre-assy-gl-crimping    | Area proses crimping terminal | t         |          1 | 2026-02-23 07:24:41.867399 | 2026-02-23 07:24:41.867399
+ 10 |           3 | Taping Area             | pre-assy-gl-taping      | Area proses taping harness    | t         |          2 | 2026-02-23 07:24:41.867399 | 2026-02-23 07:24:41.867399
+ 11 |           3 | Sub-Assy Line 1         | pre-assy-gl-sub1        | Line sub-assembly 1           | t         |          3 | 2026-02-23 07:24:41.867399 | 2026-02-23 07:24:41.867399
+ 12 |           3 | Material Store          | pre-assy-gl-store       | Area penyimpanan material     | t         |          4 | 2026-02-23 07:24:41.867399 | 2026-02-23 07:24:41.867399
+ 13 |           4 | CC Machine Zone         | pre-assy-cc-zone        | Area mesin CC & stripping     | t         |          1 | 2026-02-23 07:24:41.87381  | 2026-02-23 07:24:41.87381
+ 14 |           4 | Terminal Processing     | pre-assy-cc-terminal    | Area proses terminal          | t         |          2 | 2026-02-23 07:24:41.87381  | 2026-02-23 07:24:41.87381
+ 15 |           4 | Wire Cutting            | pre-assy-cc-cutting     | Area pemotongan wire          | t         |          3 | 2026-02-23 07:24:41.87381  | 2026-02-23 07:24:41.87381
+ 16 |           5 | Tensile Test Lab        | pre-assy-ins-tensile    | Laboratorium uji tensile      | t         |          1 | 2026-02-23 07:24:41.878895 | 2026-02-23 07:24:41.878895
+ 17 |           5 | Cross Section Lab       | pre-assy-ins-cross      | Laboratorium cross section    | t         |          2 | 2026-02-23 07:24:41.878895 | 2026-02-23 07:24:41.878895
+ 18 |           5 | Cutting Station         | pre-assy-ins-cutting    | Station pemotongan sample     | t         |          3 | 2026-02-23 07:24:41.878895 | 2026-02-23 07:24:41.878895
+ 19 |           5 | PA General Area         | pre-assy-ins-pa         | Area umum Pre-Assy            | t         |          4 | 2026-02-23 07:24:41.878895 | 2026-02-23 07:24:41.878895
+ 20 |           6 | Tool Crib               | pre-assy-tool-crib      | Penyimpanan tool & gauge      | t         |          1 | 2026-02-23 07:24:41.88355  | 2026-02-23 07:24:41.88355
+ 21 |           6 | Maintenance Workshop    | pre-assy-tool-maint     | Workshop maintenance tool     | t         |          2 | 2026-02-23 07:24:41.88355  | 2026-02-23 07:24:41.88355
+ 22 |           6 | Production Floor        | pre-assy-tool-prod      | Lantai produksi               | t         |          3 | 2026-02-23 07:24:41.88355  | 2026-02-23 07:24:41.88355
+ 23 |           7 | Jig Storage             | pre-assy-jig-storage    | Penyimpanan pressure jig      | t         |          1 | 2026-02-23 07:24:43.235479 | 2026-02-23 07:24:43.235479
+ 24 |           7 | Calibration Zone        | pre-assy-jig-calib      | Area kalibrasi jig            | t         |          2 | 2026-02-23 07:24:43.235479 | 2026-02-23 07:24:43.235479
+ 25 |           7 | Line Setup Area         | pre-assy-jig-setup      | Area setup jig di line        | t         |          3 | 2026-02-23 07:24:43.235479 | 2026-02-23 07:24:43.235479
+(25 rows)
+
+
+e_checksheet_qa=# select * from checklist_categories;
+ id |                category_name                |      category_code       |  table_type  | area_type  | is_active | sort_order |         created_at
+----+---------------------------------------------+--------------------------+--------------+------------+-----------+------------+----------------------------
+  1 | Daily Check Group Leader Final Assy         | final-assy-gl            | group-leader | final-assy | t         |          1 | 2026-02-10 11:55:32.471988
+  2 | Daily Check Inspector Final Assy            | final-assy-inspector     | inspector    | final-assy | t         |          2 | 2026-02-10 11:55:32.471988
+  3 | Daily Check Group Leader Pre Assy           | pre-assy-daily-gl        | group-leader | pre-assy   | t         |          3 | 2026-02-11 07:48:51.400478
+  4 | Call Check CC & Stripping GL Pre Assy       | pre-assy-cc-stripping-gl | group-leader | pre-assy   | t         |          4 | 2026-02-11 07:48:51.400478
+  5 | Daily Check Ins. Inspector Pre Assy         | pre-assy-daily-check-ins | inspector    | pre-assy   | t         |          5 | 2026-02-11 07:48:51.400478
+  6 | Check Sheet Control Remove Tool             | pre-assy-cs-remove-tool  | inspector    | pre-assy   | t         |          6 | 2026-02-11 07:48:51.400478
+  7 | Daily Check Pressure Jig Inspector Pre Assy | pre-assy-pressure-jig    | inspector    | pre-assy   | t         |          7 | 2026-02-11 07:48:51.400478
+(7 rows)
+
+
+e_checksheet_qa=# select * from users;
+             id             |   username    |    full_name     |   nik    |    department     |      role       |                        password_hash                         | is_active |         created_at         |         updated_at
+----------------------------+---------------+------------------+----------+-------------------+-----------------+--------------------------------------------------------------+-----------+----------------------------+----------------------------
+ user_1770696171875_bwjljww | gl_qa_daniar  | Daniar Priambodo | 12345678 | quality-assurance | group-leader-qa | $2b$10$CCYyvroKt871iw9Cxxd1IezBqrA0PaD1D6LqhCPJ/3iUySGhc.Wv. | t         | 2026-02-10 11:02:51.87784  | 2026-02-10 11:02:51.87784
+ user_1770797408736_j9ymegj | ins_qa_daniar | Daniar Priambodo | 12       | quality-assurance | inspector-qa    | $2b$10$ESEYBy3GztMwMIdFepZJ6u..wzbukAiyD.jD7l4FocwnPBeVQC/X2 | t         | 2026-02-11 15:10:08.738149 | 2026-02-11 15:10:08.738149
+(2 rows)
+
+
+e_checksheet_qa=#

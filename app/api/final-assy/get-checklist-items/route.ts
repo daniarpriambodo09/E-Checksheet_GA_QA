@@ -1,5 +1,21 @@
+// app/api/final-assy/get-checklist-items/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import pool from '@/lib/db';
+import { executeQuery } from '@/lib/db-helpers';
+
+interface ChecklistItem {
+  id: number;
+  no: string;
+  item_check: string;
+  check_point: string;
+  metode_check: string;
+  area: string;
+  shift: string;
+  show_in_wp_check: boolean;
+  show_in_checker: boolean;
+  show_in_visual_1: boolean;
+  show_in_visual_2: boolean;
+  show_in_double_check: boolean;
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -11,22 +27,24 @@ export async function GET(request: NextRequest) {
     }
 
     // Cari category_id berdasarkan type
-    let categoryId;
+    let categoryId: number;
+    
     if (type === 'inspector') {
-      const [catRes] = await pool.execute(
-        'SELECT id FROM checklist_categories WHERE category_code = ?',
+      const categories = await executeQuery<{ id: number }>(
+        'SELECT id FROM checklist_categories WHERE category_code = $1',
         ['final-assy-inspector']
       );
-      if ((catRes as any[]).length === 0) {
+      
+      if (categories.length === 0) {
         return NextResponse.json({ error: 'Category not found' }, { status: 404 });
       }
-      categoryId = (catRes as any[])[0].id;
+      categoryId = categories[0].id;
     } else {
       return NextResponse.json({ error: 'Invalid type' }, { status: 400 });
     }
 
     // Ambil data dari database
-    const [items] = await pool.execute(
+    const items = await executeQuery<ChecklistItem>(
       `SELECT 
          id, 
          item_no as no, 
@@ -41,7 +59,7 @@ export async function GET(request: NextRequest) {
          show_in_visual_2,
          show_in_double_check
        FROM checklist_items 
-       WHERE category_id = ? AND is_active = TRUE
+       WHERE category_id = $1 AND is_active = TRUE
        ORDER BY sort_order`,
       [categoryId]
     );
@@ -49,7 +67,7 @@ export async function GET(request: NextRequest) {
     // Transformasi: Kelompokkan berdasarkan (no, item_check, check_point, metode_check)
     const groupedItems: Record<string, any> = {};
     
-    (items as any[]).forEach((row) => {
+    items.forEach((row) => {
       // Key unik berdasarkan kombinasi item
       const key = `${row.no}-${row.item_check}-${row.check_point}-${row.metode_check}`;
       
@@ -78,9 +96,15 @@ export async function GET(request: NextRequest) {
       }
     });
 
-    return NextResponse.json({ success: true, data: Object.values(groupedItems) });
+    return NextResponse.json({ 
+      success: true, 
+      data: Object.values(groupedItems) 
+    });
   } catch (error) {
-    console.error('Error:', error);
-    return NextResponse.json({ error: 'Server error' }, { status: 500 });
+    console.error('❌ Error:', error);
+    return NextResponse.json({ 
+      error: 'Server error',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    }, { status: 500 });
   }
 }

@@ -1,18 +1,17 @@
-// app/status-pre-assy/page.tsx
+// app/status-pre-assy/page_b.tsx
 "use client"
 import { useState, useMemo, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { useAuth } from "@/lib/auth-context"
 import { Sidebar } from "@/components/Sidebar"
 import React from "react"
-import { Weight } from "lucide-react"
 
 // 🔹 Tipe ViewMode yang lebih strict
-type ViewMode = 
-  | "daily" 
-  | "cc-stripping" 
-  | "daily-check-ins" 
-  | "cs-remove-tool" 
+type ViewMode =
+  | "daily"
+  | "cc-stripping"
+  | "daily-check-ins"
+  | "cs-remove-tool"
   | "pressure-jig";
 
 // 🔹 Mapping role ke view modes yang diizinkan
@@ -31,17 +30,26 @@ const VIEW_MODE_LABELS: Record<ViewMode, string> = {
 };
 
 // 🔹 Mapping view mode ke button label
-const VIEW_MODE_BUTTONS: Record<ViewMode, { label: string;}> = {
+const VIEW_MODE_BUTTONS: Record<ViewMode, { label: string; }> = {
   "daily": { label: "Daily Check" },
-  "cc-stripping": { label: "CC & Stripping"},
-  "daily-check-ins": { label: "Daily Check Ins."},
-  "cs-remove-tool": { label: "CS Remove Tool"},
-  "pressure-jig": { label: "Pressure Jig"}
+  "cc-stripping": { label: "CC & Stripping" },
+  "daily-check-ins": { label: "Daily Check Ins." },
+  "cs-remove-tool": { label: "CS Remove Tool" },
+  "pressure-jig": { label: "Pressure Jig" }
+};
+
+// 🔹 Mapping view mode ke category code
+const VIEW_MODE_CATEGORY_CODE: Record<ViewMode, string> = {
+  "daily": "pre-assy-daily-gl",
+  "cc-stripping": "pre-assy-cc-stripping-gl",
+  "daily-check-ins": "pre-assy-daily-check-ins",
+  "cs-remove-tool": "pre-assy-cs-remove-tool",
+  "pressure-jig": "pre-assy-pressure-jig"
 };
 
 // 🔹 Tipe Umum
 interface CheckResult {
-  status: "OK" | "NG"
+  status: "OK" | "NG" | "-"
   ngCount: number
   items: Array<{ name: string; status: "OK" | "NG" | "N/A"; notes: string }>
   notes: string
@@ -96,7 +104,7 @@ interface CSRemoveToolItem {
   shift: "A" | "B"
 }
 
-// 🔹 Tipe Pressure Jig (BARU)
+// 🔹 Tipe Pressure Jig
 interface PressureJigCheckPoint {
   id: number
   checkPoint: string
@@ -128,7 +136,7 @@ export default function PreAssyGLStatusPage() {
   }, [allowedViewModes])
 
   // 🔹 State dengan validasi
-  const [viewMode, setViewMode] = useState<ViewMode>(getDefaultViewMode())
+  const [viewMode, setViewMode] = useState(getDefaultViewMode())
 
   // 🔹 Validasi viewMode saat role berubah
   useEffect(() => {
@@ -137,14 +145,23 @@ export default function PreAssyGLStatusPage() {
     }
   }, [allowedViewModes, viewMode, getDefaultViewMode])
 
-  // === STATE BARU UNTUK SISTEM BULAN DINAMIS ===
+  // === STATE UNTUK SISTEM BULAN DINAMIS ===
   const [activeMonth, setActiveMonth] = useState(() => new Date().getMonth())
   const [activeYear, setActiveYear] = useState(() => new Date().getFullYear())
 
-  // === STATE BARU UNTUK MINGGU (HANYA UNTUK CC & Stripping) ===
+  // === STATE UNTUK MINGGU (HANYA UNTUK CC & Stripping) ===
   const [selectedWeek, setSelectedWeek] = useState(1)
 
-  // === FUNGSI UTILITAS BARU ===
+  // === STATE DATA DARI DATABASE ===
+  const [results, setResults] = useState<Record<string, Record<string, CheckResult>>>({})
+  const [glSignaturesGL, setGlSignaturesGL] = useState<Record<string, Record<string, "-" | "☑">>>({})
+  const [glSignaturesESO, setGlSignaturesESO] = useState<Record<string, Record<string, "-" | "☑">>>({})
+  
+  // === STATE LOADING & ERROR ===
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  // === FUNGSI UTILITAS ===
   const getDaysInMonth = (year: number, month: number): number => {
     return new Date(year, month + 1, 0).getDate()
   }
@@ -171,69 +188,308 @@ export default function PreAssyGLStatusPage() {
     setActiveYear(newYear)
   }
 
-  const getDateKey = (date: number): string => {
+  const getDateKey = useCallback((date: number): string => {
     return `${activeYear}-${String(activeMonth + 1).padStart(2, '0')}-${String(date).padStart(2, '0')}`
+  }, [activeYear, activeMonth])
+
+  // === CATEGORY CODE BERDASARKAN VIEW MODE ===
+  const categoryCode = useMemo(() => {
+    return VIEW_MODE_CATEGORY_CODE[viewMode]
+  }, [viewMode])
+
+  // =====================================================================
+  // === API CALLS ===
+  // =====================================================================
+  const apiBaseUrl = '/api/pre-assy'
+
+  // Load data dari database
+  const loadDataFromDB = async () => {
+    if (!user) return
+
+    setIsLoading(true)
+    setError(null)
+
+    try {
+      const monthKey = `${activeYear}-${String(activeMonth + 1).padStart(2, '0')}`
+      
+      const [resultsRes, signaturesRes] = await Promise.all([
+        fetch(`${apiBaseUrl}/get-results?userId=${user.id}&categoryCode=${categoryCode}&month=${monthKey}`),
+        fetch(`${apiBaseUrl}/get-signatures?userId=${user.id}&categoryCode=${categoryCode}&month=${monthKey}&signatureType=gl`)
+      ])
+
+      if (!resultsRes.ok || !signaturesRes.ok) {
+        throw new Error('Gagal memuat data dari server')
+      }
+
+      const resultsData = await resultsRes.json()
+      const signaturesData = await signaturesRes.json()
+
+      if (resultsData.success) {
+        setResults(resultsData.formatted)
+      }
+      
+      if (signaturesData.success) {
+        setGlSignaturesGL(signaturesData.formatted)
+      }
+
+      // Load ESO signatures (hanya untuk daily)
+      if (viewMode === "daily") {
+        const esoRes = await fetch(`${apiBaseUrl}/get-signatures?userId=${user.id}&categoryCode=${categoryCode}&month=${monthKey}&signatureType=eso`)
+        if (esoRes.ok) {
+          const esoData = await esoRes.json()
+          if (esoData.success) {
+            setGlSignaturesESO(esoData.formatted)
+          }
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error loading from DB:', error)
+      setError(error instanceof Error ? error.message : 'Gagal memuat data dari database')
+    } finally {
+      setIsLoading(false)
+    }
   }
 
-  // === FUNGSI UNTUK CEK APAKAH TIME SLOT MASIH AKTIF (HANYA UNTUK CC & Stripping) ===
-  const isTimeSlotActive = (date: number, timeSlot: string): boolean => {
+  // Load data saat component mount atau saat bulan/view berubah
+  useEffect(() => {
+    loadDataFromDB()
+  }, [user?.id, activeMonth, activeYear, viewMode])
+
+  // Simpan hasil check ke database
+  const saveResultToDB = async (
+    itemId: number | string,
+    dateKey: string,
+    shift: "A" | "B",
+    status: "OK" | "NG" | "-",
+    ngDescription?: string,
+    ngDepartment?: string,
+    timeSlot?: string
+  ) => {
+    if (!user?.id) {
+      setError("User tidak terautentikasi")
+      return
+    }
+
+    try {
+      const response = await fetch(`${apiBaseUrl}/save-result`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.id,
+          categoryCode,
+          itemId,
+          dateKey,
+          shift,
+          status,
+          ngDescription: ngDescription || null,
+          ngDepartment: ngDepartment || null,
+          timeSlot: timeSlot || null
+        })
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Gagal menyimpan ke database')
+      }
+
+      console.log('✅ Data tersimpan')
+    } catch (error) {
+      console.error('❌ Error saving to DB:', error)
+      setError(error instanceof Error ? error.message : 'Gagal menyimpan data ke database')
+    }
+  }
+
+  // Simpan signature ke database
+  const saveSignatureToDB = async (
+    dateKey: string,
+    shift: "A" | "B",
+    signatureStatus: "-" | "☑",
+    signatureType: "gl" | "eso"
+  ) => {
+    if (!user?.id) {
+      setError("User tidak terautentikasi")
+      return
+    }
+
+    try {
+      const response = await fetch(`${apiBaseUrl}/save-signature`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.id,
+          categoryCode,
+          dateKey,
+          shift,
+          signatureStatus,
+          signatureType
+        })
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Gagal menyimpan tanda tangan ke database')
+      }
+
+      console.log('✅ Tanda tangan tersimpan')
+    } catch (error) {
+      console.error('❌ Error saving signature to DB:', error)
+      setError(error instanceof Error ? error.message : 'Gagal menyimpan tanda tangan ke database')
+    }
+  }
+
+  // =====================================================================
+  // === FUNGSI HELPER: VALIDASI SLOT WAKTU ===
+  // =====================================================================
+  const TIME_SLOTS = ["01.00", "04.00", "08.00", "13.00", "16.00", "20.00"]
+
+  /**
+   * Mengecek apakah slot waktu tertentu sudah terlewati (past)
+   * Sesuai dengan deskripsi prompt: jika jam sekarang sudah >= jam slot berikutnya
+   */
+  const isTimeSlotPassed = useCallback((date: number, timeSlot: string): boolean => {
     const now = new Date()
     const currentHour = now.getHours()
     const currentMinute = now.getMinutes()
-    // Parse time slot (format: "01.00")
-    const [slotHourStr, slotMinuteStr] = timeSlot.split('.')
-    const slotHour = parseInt(slotHourStr)
-    const slotMinute = parseInt(slotMinuteStr) || 0
 
-    // Buat Date object untuk tanggal yang dipilih
-    const checkDate = new Date(activeYear, activeMonth, date)
+    const cellDateTime = new Date(activeYear, activeMonth, date)
+    const isSameDay =
+      cellDateTime.getDate() === now.getDate() &&
+      cellDateTime.getMonth() === now.getMonth() &&
+      cellDateTime.getFullYear() === now.getFullYear()
 
-    // Jika tanggal berbeda dengan hari ini
-    if (checkDate.getDate() !== now.getDate() || 
-        checkDate.getMonth() !== now.getMonth() || 
-        checkDate.getFullYear() !== now.getFullYear()) {
-      // Untuk tanggal masa lalu: tidak aktif
-      if (checkDate < now) return false
-      // Untuk tanggal masa depan: aktif
-      return true
+    // Jika bukan hari yang sama, cek apakah sudah lewat
+    if (!isSameDay) {
+      return cellDateTime < now
     }
 
-    // Untuk hari ini: cek interval waktu
-    const currentTimeInMinutes = currentHour * 60 + currentMinute
-    const slotTimeInMinutes = slotHour * 60 + slotMinute
+    // Hari yang sama, cek waktu slot
+    const slotIndex = TIME_SLOTS.findIndex(ts => ts === timeSlot)
+    if (slotIndex === -1) return false
 
-    // Interval waktu:
-    // 01:00-04:00 → aktif sampai 04:00
-    // 04:00-08:00 → aktif sampai 08:00
-    // 08:00-13:00 → aktif sampai 13:00
-    // 13:00-16:00 → aktif sampai 16:00
-    // 16:00-20:00 → aktif sampai 20:00
-    // 20:00-01:00 → aktif sampai 01:00 (hari berikutnya)
-
-    const nextTimeSlots = ["04.00", "08.00", "13.00", "16.00", "20.00", "01.00"]
-    const currentIndex = nextTimeSlots.findIndex(ts => ts === timeSlot)
-
-    if (currentIndex === -1) return false
-
-    const nextSlot = nextTimeSlots[(currentIndex + 1) % nextTimeSlots.length]
+    // Ambil slot berikutnya untuk menentukan kapan slot selesai
+    const nextSlot = TIME_SLOTS[(slotIndex + 1) % TIME_SLOTS.length]
     const [nextHourStr, nextMinuteStr] = nextSlot.split('.')
     const nextHour = parseInt(nextHourStr)
     const nextMinute = parseInt(nextMinuteStr) || 0
 
+    const [slotHourStr, slotMinuteStr] = timeSlot.split('.')
+    const slotHour = parseInt(slotHourStr)
+    const slotMinute = parseInt(slotMinuteStr) || 0
+
+    const currentTimeInMinutes = currentHour * 60 + currentMinute
+    const nextTimeInMinutes = nextHour * 60 + nextMinute
+    const slotTimeInMinutes = slotHour * 60 + slotMinute
+
+    // Khusus slot 20.00 yang wrap ke hari berikutnya
+    if (timeSlot === "20.00") {
+      // 20.00 - 01.00 (next day)
+      const isPassed = currentTimeInMinutes >= nextTimeInMinutes && currentTimeInMinutes < slotTimeInMinutes
+      return !isPassed // jika tidak dalam range, berarti sudah lewat
+    }
+
+    // Slot normal: sudah lewat jika waktu sekarang >= slot berikutnya
+    return currentTimeInMinutes >= nextTimeInMinutes
+  }, [activeMonth, activeYear])
+
+  /**
+   * Mengecek apakah slot waktu sedang aktif (user bisa menginput)
+   */
+  const isTimeSlotActive = useCallback((date: number, timeSlot: string): boolean => {
+    const now = new Date()
+    const currentHour = now.getHours()
+    const currentMinute = now.getMinutes()
+
+    const cellDateTime = new Date(activeYear, activeMonth, date)
+    const isSameDay =
+      cellDateTime.getDate() === now.getDate() &&
+      cellDateTime.getMonth() === now.getMonth() &&
+      cellDateTime.getFullYear() === now.getFullYear()
+
+    // Hanya bisa aktif pada hari yang sama
+    if (!isSameDay) return false
+
+    const slotIndex = TIME_SLOTS.findIndex(ts => ts === timeSlot)
+    if (slotIndex === -1) return false
+
+    const [slotHourStr, slotMinuteStr] = timeSlot.split('.')
+    const slotHour = parseInt(slotHourStr)
+    const slotMinute = parseInt(slotMinuteStr) || 0
+
+    const nextSlot = TIME_SLOTS[(slotIndex + 1) % TIME_SLOTS.length]
+    const [nextHourStr, nextMinuteStr] = nextSlot.split('.')
+    const nextHour = parseInt(nextHourStr)
+    const nextMinute = parseInt(nextMinuteStr) || 0
+
+    const currentTimeInMinutes = currentHour * 60 + currentMinute
+    const slotTimeInMinutes = slotHour * 60 + slotMinute
     const nextTimeInMinutes = nextHour * 60 + nextMinute
 
-    // Untuk slot 20:00 → 01:00 (hari berikutnya)
+    // Khusus slot 20.00 yang wrap ke hari berikutnya
     if (timeSlot === "20.00") {
       return currentTimeInMinutes >= slotTimeInMinutes || currentTimeInMinutes < nextTimeInMinutes
     }
 
+    // Slot normal
     return currentTimeInMinutes >= slotTimeInMinutes && currentTimeInMinutes < nextTimeInMinutes
-  }
+  }, [activeMonth, activeYear])
+
+  // =====================================================================
+  // === FUNGSI HELPER: PENENTU EDITABLE CELL (UPDATED) ===
+  // =====================================================================
+  const isCellEditable = useCallback((
+    cellDate: number,
+    status: "OK" | "NG" | "-",
+    timeSlot?: string
+  ): boolean => {
+    const now = new Date()
+    const cellDateTime = new Date(activeYear, activeMonth, cellDate)
+
+    // ✅ 1. Status NG SELALU bisa diedit (sesuai prompt)
+    if (status === "NG") {
+      return true
+    }
+
+    // ✅ 2. Jika BUKAN hari ini
+    if (cellDateTime.getDate() !== now.getDate() ||
+        cellDateTime.getMonth() !== now.getMonth() ||
+        cellDateTime.getFullYear() !== now.getFullYear()) {
+      // Hari sudah lewat: "-" dan "OK" tidak bisa diedit
+      if (cellDateTime < now) {
+        return false
+      }
+      // Hari belum tiba: tidak bisa diedit
+      return false
+    }
+
+    // ✅ 3. Hari ini dengan timeSlot
+    if (timeSlot) {
+      // Jika slot sudah terlewati
+      if (isTimeSlotPassed(cellDate, timeSlot)) {
+        // Status "-" dan "OK" tidak bisa diedit, hanya NG yang bisa menjadi OK
+        return status === "NG"
+      }
+
+      // Jika slot sedang aktif
+      if (isTimeSlotActive(cellDate, timeSlot)) {
+        return true // Bisa edit semua status
+      }
+
+      // Jika slot belum masuk
+      return false
+    }
+
+    // ✅ 4. Hari ini tanpa timeSlot selalu editable
+    return true
+  }, [activeMonth, activeYear, isTimeSlotPassed, isTimeSlotActive])
+
+
+  // =====================================================================
+
 
   // === FUNGSI UNTUK MENDAPATKAN MINGGU DALAM BULAN (MEMOIZED) ===
   const getWeeksInMonth = useMemo(() => {
     const daysInMonth = getDaysInMonth(activeYear, activeMonth)
-    const firstDay = new Date(activeYear, activeMonth, 1).getDay() // 0=Sun, 6=Sat
+    const firstDay = new Date(activeYear, activeMonth, 1).getDay()
     const totalDays = daysInMonth + firstDay
     const weeksCount = Math.ceil(totalDays / 7)
     const weeks = []
@@ -305,7 +561,7 @@ export default function PreAssyGLStatusPage() {
   const currentYear = new Date().getFullYear()
   const isCurrentMonth = activeMonth === currentMonth && activeYear === currentYear
 
-  // === DATA CHECKPOINTS (TETAP SAMA) ===
+  // === DATA CHECKPOINTS (HARDCODED - NANTI BISA DIGANTI DARI DB) ===
   const DAILY_CHECKPOINTS: DailyCheckPoint[] = useMemo(() => [
     { id: 1, checkPoint: "Inspector check product yang mengalami perubahan 4M dan hasilnya di up date di C/S 4M", standard: "Check pengisian C/S 4M", shift: "A", waktuCheck: "Setiap Hari" },
     { id: 1.1, checkPoint: "Inspector check product yang mengalami perubahan 4M dan hasilnya di up date di C/S 4M", standard: "Check pengisian C/S 4M", shift: "B", waktuCheck: "Setiap Hari" },
@@ -622,7 +878,6 @@ export default function PreAssyGLStatusPage() {
     { id: "16-X-3-B", no: 16, toolType: "CLIPPER", controlNo: " ", itemCheck: "Ada dan sesuai control numbernya", shift: "B" },
   ], [])
 
-  // 🔹 DATA: Pressure Jig (BARU - SESUAI PAGE /status-pre-assy-pressure-jig)
   const PRESSURE_JIG_CHECKPOINTS: PressureJigCheckPoint[] = useMemo(() => [
     { id: 1, checkPoint: "Apakah pressure jig diletakkan sesuai dengan tempatnya.", shift: "A", frequency: "1x /Hari", judge: "O/X" },
     { id: 1.1, checkPoint: "Apakah pressure jig diletakkan sesuai dengan tempatnya.", shift: "B", frequency: "1x /Hari", judge: "O/X" },
@@ -640,120 +895,64 @@ export default function PreAssyGLStatusPage() {
     { id: 7.1, checkPoint: "Apakah tekanan dari contact pressure jig masih dalam skala rata-rata.", shift: "B", frequency: "1x /Bulan", judge: " " },
   ], [])
 
-  // === GANTI STORAGE KEY DENGAN POLA KONSISTEN + TAMBAHKAN pressure-jig ===
-  const storageKey = useMemo(
-    () => {
-      if (viewMode === "daily") {
-        return "preAssyGroupLeaderDailyCheckResults"
-      } else if (viewMode === "cc-stripping") {
-        return "preAssyGroupLeaderCcStrippingDailyCheckResults"
-      } else if (viewMode === "daily-check-ins") {
-        return "preAssyInspectorDailyCheckResults"
-      } else if (viewMode === "cs-remove-tool") {
-        return "csRemoveControlResults"
-      } else if (viewMode === "pressure-jig") {
-        return "preAssyPressureJigInspectorDailyCheckResults"
-      }
-      return "preAssy_unknown"
-    },
-    [viewMode]
-  )
-
-  const [results, setResults] = useState<Record<string, Record<string, CheckResult>>>(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem(storageKey)
-      return saved ? JSON.parse(saved) : {}
-    }
-    return {}
-  })
-
-  useEffect(() => {
-    const load = () => {
-      if (typeof window !== "undefined") {
-        const saved = localStorage.getItem(storageKey)
-        setResults(saved ? JSON.parse(saved) : {})
-      }
-    }
-    load()
-    const handler = () => load()
-    window.addEventListener("storage", handler)
-    const interval = setInterval(load, 500)
-    const focusHandler = () => load()
-    window.addEventListener("focus", focusHandler)
-    return () => {
-      window.removeEventListener("storage", handler)
-      window.removeEventListener("focus", focusHandler)
-      clearInterval(interval)
-    }
-  }, [storageKey])
-
-  // 🔹 Render tombol berdasarkan role
-  const renderViewModeButtons = () => {
-    return allowedViewModes.map((mode) => {
-      const { label} = VIEW_MODE_BUTTONS[mode]
-      return (
-        <button
-        style={{
-          padding: "10px 20px",
-          border: "2px solid transparent",
-          fontWeight: "600",
-          cursor: "pointer",
-          transition: "all 0.2s"
-        }}
-          key={mode}
-          className={`btn-mode ${viewMode === mode ? "active" : ""}`}
-          onClick={() => setViewMode(mode)}
-          title={VIEW_MODE_LABELS[mode]}
-        >{label}
-        </button>
-      )
-    })
-  }
-
-  // 🔹 Render header dengan judul yang sesuai
-  const renderActiveTitle = () => {
-    return VIEW_MODE_LABELS[viewMode]
-  }
-
-  const weekdays = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"]
-  const timeSlots = ["01.00", "04.00", "08.00", "13.00", "16.00", "20.00"]
-
   // === FUNGSI GET RESULT DINAMIS ===
-  const getResult = (date: number, id: number, shift: "A" | "B", timeSlot?: string) => {
+  const getResult = useCallback((date: number, id: number | string, shift: "A" | "B", timeSlot?: string) => {
     const dateKey = getDateKey(date)
     const key = timeSlot ? `${id}-${shift}-${timeSlot}` : `${id}-${shift}`
     return results[dateKey]?.[key] || null
-  }
+  }, [results, getDateKey])
 
   // === FUNGSI GET RESULT UNTUK CS REMOVE TOOL ===
-  const getCSRemoveResult = (date: number, itemId: string) => {
+  const getCSRemoveResult = useCallback((date: number, itemId: string) => {
     const dateKey = getDateKey(date)
     return results[dateKey]?.[itemId] || null
-  }
+  }, [results, getDateKey])
 
-  // === FUNGSI GET RESULT UNTUK DAILY CHECK INS (MINGGU-HARI) ===
-  const getResultDailyCheckIns = (weekIndex: number, dayIndex: number, checkpointId: number, shift: "A" | "B") => {
+  // === FUNGSI GET RESULT UNTUK DAILY CHECK INS ===
+  const getResultDailyCheckIns = useCallback((weekIndex: number, dayIndex: number, checkpointId: number, shift: "A" | "B") => {
     if (!getWeeksInMonth[weekIndex]) return null
     const day = getWeeksInMonth[weekIndex].days[dayIndex]
     if (!day) return null
     const dateKey = getDateKey(day.date)
     const checkpointKey = `${checkpointId}-${shift}`
     return results[dateKey]?.[checkpointKey] || null
-  }
+  }, [results, getDateKey, getWeeksInMonth])
 
-  // === FUNGSI HANDLE STATUS CHANGE (DEEP CLONE) ===
-  const handleStatusChange = (
+  // === HANDLE STATUS CHANGE ===
+  const handleStatusChange = useCallback(async (
     date: number,
-    id: number,
+    id: number | string,
     shift: "A" | "B",
     newStatus: "OK" | "NG" | "-",
-    type: "daily" | "cc-stripping" | "daily-check-ins" | "cs-remove-tool" | "pressure-jig",
+    type: ViewMode,
     timeSlot?: string
   ) => {
+    // 🔹 FIX: Untuk Shift B dengan ID desimal (misal 1.1), ambil ID dasarnya (1)
+    const baseId = typeof id === "number" ? Math.floor(id) : id
+    
     const dateKey = getDateKey(date)
-    const itemKey = timeSlot ? `${id}-${shift}-${timeSlot}` : `${id}-${shift}`
-    // DEEP CLONE untuk menghindari reference issues
+    const itemKey = timeSlot ? `${baseId}-${shift}-${timeSlot}` : `${baseId}-${shift}`
+    
+    // 🔹 Dapatkan status sebelumnya
+    const currentStatus = results[dateKey]?.[itemKey]?.status || "-"
+    
+    // 🔹 VALIDASI KRITIS: Cegah perubahan yang tidak diizinkan
+    const isPassed = timeSlot ? isTimeSlotPassed(date, timeSlot) : false
+    
+    if (isPassed && currentStatus === "OK" && newStatus !== "OK") {
+      // Jangan ubah OK yang sudah lewat slot
+      console.warn("❌ Cannot change OK status after slot has passed")
+      return
+    }
+    
+    if (isPassed && currentStatus === "-" && newStatus !== "-") {
+      // Jangan isi slot yang sudah lewat jika belum ada data
+      console.warn("❌ Cannot fill empty slot after it has passed")
+      return
+    }
+    
     const newResults = JSON.parse(JSON.stringify(results))
+    
     if (newStatus === "-") {
       if (newResults[dateKey]?.[itemKey]) {
         delete newResults[dateKey][itemKey]
@@ -768,10 +967,10 @@ export default function PreAssyGLStatusPage() {
         status: "NG",
         ngCount: 1,
         items: existing?.items || [],
-        notes: existing?.notes || "    ",
+        notes: existing?.notes || "     ",
         submittedAt: new Date().toISOString(),
         submittedBy: user?.fullName || "Unknown",
-        ngDescription: existing?.ngDescription || "    ",
+        ngDescription: existing?.ngDescription || "     ",
         ngDepartment: existing?.ngDepartment || "QA"
       }
       setNgModal({
@@ -779,7 +978,7 @@ export default function PreAssyGLStatusPage() {
         checkpoint: { id, shift },
         shift,
         type,
-        notes: existing?.ngDescription || "    ",
+        notes: existing?.ngDescription || "     ",
         department: existing?.ngDepartment || "QA"
       })
     } else {
@@ -789,27 +988,29 @@ export default function PreAssyGLStatusPage() {
         status: "OK",
         ngCount: 0,
         items: existing?.items || [],
-        notes: existing?.notes || "    ",
+        notes: existing?.notes || "     ",
         submittedAt: new Date().toISOString(),
         submittedBy: user?.fullName || "Unknown",
-        ngDescription: existing?.ngDescription || "    ",
+        ngDescription: existing?.ngDescription || "     ",
         ngDepartment: existing?.ngDepartment || "QA"
       }
     }
+    
     setResults(newResults)
-    if (typeof window !== "undefined") {
-      localStorage.setItem(storageKey, JSON.stringify(newResults))
-    }
-  }
+    
+    // Simpan ke database (gunakan baseId)
+    await saveResultToDB(baseId, dateKey, shift, newStatus, "", "", timeSlot)
+  }, [results, user?.fullName, getDateKey, isTimeSlotPassed])
 
-  // === FUNGSI HANDLE STATUS CHANGE UNTUK CS REMOVE TOOL ===
-  const handleCSRemoveStatusChange = (
+  // === HANDLE STATUS CHANGE UNTUK CS REMOVE TOOL ===
+  const handleCSRemoveStatusChange = useCallback(async (
     date: number,
     itemId: string,
     newStatus: "OK" | "NG" | "-"
   ) => {
     const dateKey = getDateKey(date)
     const newResults = JSON.parse(JSON.stringify(results))
+    
     if (newStatus === "-") {
       if (newResults[dateKey]?.[itemId]) {
         delete newResults[dateKey][itemId]
@@ -824,10 +1025,10 @@ export default function PreAssyGLStatusPage() {
         status: "NG",
         ngCount: 1,
         items: [],
-        notes: "    ",
+        notes: "     ",
         submittedAt: new Date().toISOString(),
         submittedBy: user?.fullName || "Unknown",
-        ngDescription: existing?.ngDescription || "    ",
+        ngDescription: existing?.ngDescription || "     ",
         ngDepartment: existing?.ngDepartment || "QA"
       }
       setNgModal({
@@ -835,7 +1036,7 @@ export default function PreAssyGLStatusPage() {
         checkpoint: { id: itemId },
         shift: "A",
         type: "cs-remove-tool",
-        notes: existing?.ngDescription || "    ",
+        notes: existing?.ngDescription || "     ",
         department: existing?.ngDepartment || "QA"
       })
     } else {
@@ -845,21 +1046,20 @@ export default function PreAssyGLStatusPage() {
         status: "OK",
         ngCount: 0,
         items: [],
-        notes: "    ",
+        notes: "     ",
         submittedAt: new Date().toISOString(),
         submittedBy: user?.fullName || "Unknown",
-        ngDescription: existing?.ngDescription || "    ",
+        ngDescription: existing?.ngDescription || "     ",
         ngDepartment: existing?.ngDepartment || "QA"
       }
     }
+    
     setResults(newResults)
-    if (typeof window !== "undefined") {
-      localStorage.setItem(storageKey, JSON.stringify(newResults))
-    }
-  }
+    await saveResultToDB(itemId, dateKey, "A", newStatus)
+  }, [results, user?.fullName])
 
-  // === FUNGSI HANDLE STATUS CHANGE UNTUK DAILY CHECK INS ===
-  const handleStatusChangeDailyCheckIns = (
+  // === HANDLE STATUS CHANGE UNTUK DAILY CHECK INS ===
+  const handleStatusChangeDailyCheckIns = useCallback(async (
     weekIndex: number,
     dayIndex: number,
     checkpointId: number,
@@ -869,10 +1069,13 @@ export default function PreAssyGLStatusPage() {
     if (!getWeeksInMonth[weekIndex]) return
     const day = getWeeksInMonth[weekIndex].days[dayIndex]
     if (!day) return
+    
     const date = day.date
     const dateKey = getDateKey(date)
     const checkpointKey = `${checkpointId}-${shift}`
+    
     const newResults = JSON.parse(JSON.stringify(results))
+    
     if (newStatus === "-") {
       if (newResults[dateKey]?.[checkpointKey]) {
         delete newResults[dateKey][checkpointKey]
@@ -887,10 +1090,10 @@ export default function PreAssyGLStatusPage() {
         status: "NG",
         ngCount: 1,
         items: [],
-        notes: "    ",
+        notes: "     ",
         submittedAt: new Date().toISOString(),
         submittedBy: user?.fullName || "Unknown",
-        ngDescription: existing?.ngDescription || "    ",
+        ngDescription: existing?.ngDescription || "     ",
         ngDepartment: existing?.ngDepartment || "QA"
       }
       setNgModal({
@@ -899,7 +1102,7 @@ export default function PreAssyGLStatusPage() {
         checkpoint: { id: checkpointId, shift },
         shift,
         type: "daily-check-ins",
-        notes: existing?.ngDescription || "    ",
+        notes: existing?.ngDescription || "     ",
         department: existing?.ngDepartment || "QA"
       })
     } else {
@@ -909,149 +1112,336 @@ export default function PreAssyGLStatusPage() {
         status: "OK",
         ngCount: 0,
         items: [],
-        notes: "    ",
+        notes: "     ",
         submittedAt: new Date().toISOString(),
         submittedBy: user?.fullName || "Unknown",
-        ngDescription: existing?.ngDescription || "    ",
+        ngDescription: existing?.ngDescription || "     ",
         ngDepartment: existing?.ngDepartment || "QA"
       }
     }
+    
     setResults(newResults)
-    if (typeof window !== "undefined") {
-      localStorage.setItem(storageKey, JSON.stringify(newResults))
-    }
-  }
+    await saveResultToDB(checkpointId, dateKey, shift, newStatus)
+  }, [results, user?.fullName, getWeeksInMonth])
 
-  // === FUNGSI SAVE NG REPORT ===
-  const saveNgReport = () => {
+  // === SAVE NG REPORT ===
+  const saveNgReport = async () => {
     if (!ngModal) return
+    
     const { date, weekIndex, dayIndex, checkpoint, shift, type, notes, department } = ngModal
     let dateKey = ""
+    
     if (type === "daily-check-ins" && weekIndex !== undefined && dayIndex !== undefined) {
       const day = getWeeksInMonth[weekIndex].days[dayIndex]
       dateKey = getDateKey(day.date)
     } else if (date) {
       dateKey = getDateKey(date)
     }
+    
     if (!dateKey) return
+    
     const itemKey = `${checkpoint.id}-${shift}`
     const newResults = JSON.parse(JSON.stringify(results))
+    
     newResults[dateKey] = newResults[dateKey] || {}
     newResults[dateKey][itemKey] = {
       ...newResults[dateKey][itemKey],
       ngDescription: notes,
       ngDepartment: department
     }
+    
     setResults(newResults)
-    if (typeof window !== "undefined") {
-      localStorage.setItem(storageKey, JSON.stringify(newResults))
-    }
+    
+    // Simpan ke database dengan detail NG
+    await saveResultToDB(checkpoint.id, dateKey, shift, "NG", notes, department)
+    
     setNgModal(null)
   }
 
-  // === FUNGSI RENDER STATUS CELL (EDITABLE UNTUK SEMUA TANGGAL) ===
-  const renderStatusCell = (date: number, checkpoint: any, timeSlot?: string) => {
-    const id = checkpoint.id
-    const shift = checkpoint.shift
-    const result = getResult(date, id, shift, timeSlot)
-    if (result || (isCurrentMonth && date === today)) {
-      const currentStatus = result?.status ||
-        results[getDateKey(date)]?.[timeSlot ? `${id}-${shift}-${timeSlot}` : `${id}-${shift}`]?.status || "-"
-      const getBgColor = (status: string) => {
-        if (status === "OK") return "#4caf50"
-        if (status === "NG") return "#f44336"
-        return "#9e9e9e"
-      }
-      return (
-        <select
-          className="status-dropdown"
-          style={{
-            backgroundColor: getBgColor(currentStatus),
-            color: "white"
-          }}
-          value={currentStatus}
-          onChange={(e) => handleStatusChange(date, id, shift, e.target.value as "OK" | "NG" | "-", viewMode as any, timeSlot)}
-        >
-          <option value="-">-</option>
-          <option value="OK">✓ OK</option>
-          <option value="NG">✗ NG</option>
-        </select>
-      )
-    }
-    return "-"
-  }
+  // [LANJUTAN DI COMMENT BERIKUTNYA - Terlalu panjang]
 
-  // === FUNGSI RENDER STATUS CELL UNTUK CS REMOVE TOOL ===
-  const renderCSRemoveStatusCell = (date: number, item: CSRemoveToolItem) => {
-    const result = getCSRemoveResult(date, item.id)
-    const currentStatus = result?.status || results[getDateKey(date)]?.[item.id]?.status || "-"
+  const renderStatusCell = useCallback((date: number, checkpoint: any, timeSlot?: string) => {
+    let id = checkpoint.id
+    let shift = checkpoint.shift
+    
+    // 🔹 FIX: Untuk Shift B dengan ID desimal (misal 1.1), ambil ID dasarnya (1)
+    // Ini memastikan data ShiftA dan ShiftB bisa ditemukan dengan ID yang sama
+    const baseId = Math.floor(id)
+    
+    const dateKey = getDateKey(date)
+    // 🔹 Gunakan baseId untuk semua view modes untuk konsistensi
+    const itemKey = timeSlot ? `${baseId}-${shift}-${timeSlot}` : `${baseId}-${shift}`
+    
+    // 🔹 PENTING: Ambil status dari database, jangan sampai berubah menjadi "-"
+    const storedStatus = results[dateKey]?.[itemKey]?.status || "-"
+    
+    const currentStatus = storedStatus
+    const isEditable = isCellEditable(date, currentStatus as "OK" | "NG" | "-", timeSlot)
+    
     const getBgColor = (status: string) => {
       if (status === "OK") return "#4caf50"
       if (status === "NG") return "#f44336"
       return "#9e9e9e"
     }
+    
+    // 🔹 KUNCI: History tetap ditampilkan, tidak boleh berubah menjadi "-"
+    // Jika status sudah pernah disimpan (dari database), tampilkan terus meskipun sudah lewat
+    if (currentStatus !== "-") {
+      // Ada data yang sudah tersimpan, tampilkan dengan status yang benar
+      if (isEditable) {
+        // Masih bisa diedit (hanya NG yang masih editable setelah lewat slot)
+        return (
+          <select
+            className="status-dropdown"
+            style={{
+              backgroundColor: getBgColor(currentStatus),
+              color: "white",
+              width: '100%',
+              border: 'none',
+              cursor: 'pointer',
+              padding: '4px 8px',
+              fontSize: '12px',
+              fontWeight: '500',
+              textAlign: 'center',
+              borderRadius: '4px'
+            }}
+            value={currentStatus}
+            onChange={(e) => handleStatusChange(
+              date, 
+              id, 
+              shift, 
+              e.target.value as "OK" | "NG" | "-", 
+              viewMode as any, 
+              timeSlot
+            )}
+          >
+            <option value="-">-</option>
+            <option value="OK">✓ OK</option>
+            <option value="NG">✗ NG</option>
+          </select>
+        )
+      } else {
+        // Read-only (OK yang sudah lewat atau masa lalu)
+        return (
+          <span
+            style={{
+              display: 'inline-block',
+              width: '100%',
+              backgroundColor: getBgColor(currentStatus),
+              color: 'white',
+              padding: '4px 8px',
+              borderRadius: '4px',
+              fontWeight: '500',
+              fontSize: '12px',
+              textAlign: 'center'
+            }}
+            title={
+              currentStatus === "OK" 
+                ? "Status OK (Locked - Cannot be changed)" 
+                : currentStatus === "NG" 
+                ? "NG Status (Already passed slot)" 
+                : "Saved data"
+            }
+          >
+            {currentStatus}
+          </span>
+        )
+      }
+    }
+    
+    // Tidak ada data (status = "-")
+    if (!isEditable) {
+      // Slot sudah lewat atau belum masuk, tampilkan "-" tanpa interaksi
+      return <span style={{ color: "#9e9e9e", fontSize: '12px' }}>-</span>
+    }
+    
+    // Slot sedang aktif, bisa diisi
     return (
       <select
         className="status-dropdown"
         style={{
           backgroundColor: getBgColor(currentStatus),
-          color: "white"
+          color: "white",
+          width: '100%',
+          border: 'none',
+          cursor: 'pointer',
+          padding: '4px 8px',
+          fontSize: '12px',
+          fontWeight: '500',
+          textAlign: 'center',
+          borderRadius: '4px'
         }}
         value={currentStatus}
-        onChange={(e) => handleCSRemoveStatusChange(date, item.id, e.target.value as "OK" | "NG" | "-")}
+        onChange={(e) => handleStatusChange(
+          date, 
+          id, 
+          shift, 
+          e.target.value as "OK" | "NG" | "-", 
+          viewMode as any, 
+          timeSlot
+        )}
       >
         <option value="-">-</option>
         <option value="OK">✓ OK</option>
         <option value="NG">✗ NG</option>
       </select>
     )
-  }
+  }, [results, isCellEditable, handleStatusChange, viewMode, getDateKey])
 
-  // === FUNGSI RENDER STATUS CELL UNTUK DAILY CHECK INS (EDITABLE) ===
-  const renderStatusCellDailyCheckIns = (weekIndex: number, dayIndex: number, checkpoint: any) => {
-    const checkpointId = checkpoint.id
-    const shift = checkpoint.shift
-    const result = getResultDailyCheckIns(weekIndex, dayIndex, checkpointId, shift)
-    if (!getWeeksInMonth[weekIndex]) return "-"
-    const day = getWeeksInMonth[weekIndex].days[dayIndex]
-    if (!day) return "-"
-    if (result || (isCurrentMonth && day.date === today)) {
-      const dateKey = getDateKey(day.date)
-      const checkpointKey = `${checkpointId}-${shift}`
-      const currentStatus = result?.status || results[dateKey]?.[checkpointKey]?.status || "-"
-      const getBgColor = (status: string) => {
-        if (status === "OK") return "#4caf50"
-        if (status === "NG") return "#f44336"
-        return "#9e9e9e"
-      }
+  // [RENDER FUNCTIONS - sama seperti kode asli]
+  const renderCSRemoveStatusCell = useCallback((date: number, item: CSRemoveToolItem) => {
+    const result = getCSRemoveResult(date, item.id)
+    const dateKey = getDateKey(date)
+    const currentStatus = result?.status || results[dateKey]?.[item.id]?.status || "-"
+    
+    // Tentukan apakah cell editable
+    const isEditable = isCellEditable(date, currentStatus as "OK" | "NG" | "-")
+    
+    // Tentukan warna background
+    const getBgColor = (status: string) => {
+      if (status === "OK") return "#4caf50"
+      if (status === "NG") return "#f44336"
+      return "#9e9e9e"
+    }
+    
+    // Jika tidak ada data dan bukan hari ini, tampilkan "-"
+    if (currentStatus === "-" && !isEditable) {
+      return <span style={{ color: "#9e9e9e" }}>-</span>
+    }
+    
+    // Render dropdown jika editable, atau badge statis jika tidak
+    if (isEditable) {
       return (
         <select
           className="status-dropdown"
           style={{
             backgroundColor: getBgColor(currentStatus),
-            color: "white"
+            color: "white",
+            width: '100%',
+            border: 'none',
+            cursor: 'pointer',
+            padding: '4px 8px',
+            fontSize: '12px',
+            fontWeight: '500',
+            textAlign: 'center'
           }}
           value={currentStatus}
-          onChange={(e) => handleStatusChangeDailyCheckIns(weekIndex, dayIndex, checkpointId, shift, e.target.value as "OK" | "NG" | "-")}
+          onChange={(e) => handleCSRemoveStatusChange(date, item.id, e.target.value as "OK" | "NG" | "-")}
         >
           <option value="-">-</option>
           <option value="OK">✓ OK</option>
           <option value="NG">✗ NG</option>
         </select>
       )
+    } else {
+      // Tampilkan badge statis (read-only)
+      return (
+        <span
+          className={`status-badge ${
+            currentStatus === "OK" ? "status-badge-ok" : "status-badge-ng"
+          }`}
+          style={{
+            display: 'inline-block',
+            width: '100%',
+            backgroundColor: getBgColor(currentStatus),
+            color: 'white',
+            padding: '4px 8px',
+            borderRadius: '4px',
+            fontWeight: '500',
+            fontSize: '12px',
+            textAlign: 'center'
+          }}
+        >
+          {currentStatus}
+        </span>
+      )
     }
-    return "-"
-  }
+  }, [getCSRemoveResult, results, isCellEditable, handleCSRemoveStatusChange])
 
-  // === FUNGSI UNTUK MENDAPATKAN HARI DALAM BULAN ===
-  const getHari = (date: number): string | null => {
-    const d = new Date(activeYear, activeMonth, date)
-    const dayIndex = d.getDay()
-    if (dayIndex === 0 || dayIndex === 6) return null
-    return weekdays[dayIndex - 1]
-  }
+  const renderStatusCellDailyCheckIns = useCallback((weekIndex: number, dayIndex: number, checkpoint: any) => {
+    const checkpointId = checkpoint.id
+    const shift = checkpoint.shift
+    
+    if (!getWeeksInMonth[weekIndex]) return "-"
+    const day = getWeeksInMonth[weekIndex].days[dayIndex]
+    if (!day) return "-"
+    
+    const date = day.date
+    const result = getResultDailyCheckIns(weekIndex, dayIndex, checkpointId, shift)
+    const dateKey = getDateKey(date)
+    const checkpointKey = `${checkpointId}-${shift}`
+    const currentStatus = result?.status || results[dateKey]?.[checkpointKey]?.status || "-"
+    
+    // Tentukan apakah cell editable
+    const isEditable = isCellEditable(date, currentStatus as "OK" | "NG" | "-")
+    
+    // Tentukan warna background
+    const getBgColor = (status: string) => {
+      if (status === "OK") return "#4caf50"
+      if (status === "NG") return "#f44336"
+      return "#9e9e9e"
+    }
+    
+    // Jika tidak ada data dan bukan hari ini, tampilkan "-"
+    if (currentStatus === "-" && !isEditable) {
+      return <span style={{ color: "#9e9e9e" }}>-</span>
+    }
+    
+    // Render dropdown jika editable, atau badge statis jika tidak
+    if (isEditable) {
+      return (
+        <select
+          className="status-dropdown"
+          style={{
+            backgroundColor: getBgColor(currentStatus),
+            color: "white",
+            width: '100%',
+            border: 'none',
+            cursor: 'pointer',
+            padding: '4px 8px',
+            fontSize: '12px',
+            fontWeight: '500',
+            textAlign: 'center'
+          }}
+          value={currentStatus}
+          onChange={(e) => handleStatusChangeDailyCheckIns(
+            weekIndex, 
+            dayIndex, 
+            checkpointId, 
+            shift, 
+            e.target.value as "OK" | "NG" | "-"
+          )}
+        >
+          <option value="-">-</option>
+          <option value="OK">✓ OK</option>
+          <option value="NG">✗ NG</option>
+        </select>
+      )
+    } else {
+      // Tampilkan badge statis (read-only)
+      return (
+        <span
+          className={`status-badge ${
+            currentStatus === "OK" ? "status-badge-ok" : "status-badge-ng"
+          }`}
+          style={{
+            display: 'inline-block',
+            width: '100%',
+            backgroundColor: getBgColor(currentStatus),
+            color: 'white',
+            padding: '4px 8px',
+            borderRadius: '4px',
+            fontWeight: '500',
+            fontSize: '12px',
+            textAlign: 'center'
+          }}
+        >
+          {currentStatus}
+        </span>
+      )
+    }
+  }, [getWeeksInMonth, getResultDailyCheckIns, results, isCellEditable, handleStatusChangeDailyCheckIns])
 
-  // === FUNGSI UNTUK MENGECEK APAKAH HARI INI ATAU SUDAH LEWAT ===
   const isDayNeeded = (schedule: string, dayName: string): boolean => {
     if (schedule === "Setiap Hari") return true
     return false
@@ -1065,21 +1455,48 @@ export default function PreAssyGLStatusPage() {
     return checkDate <= todayDate
   }
 
-  // === STATE UNTUK MODAL ===
+  const renderViewModeButtons = () => {
+    return allowedViewModes.map((mode) => {
+      const { label } = VIEW_MODE_BUTTONS[mode]
+      return (
+        <button
+          style={{
+            padding: "10px 20px",
+            border: "2px solid transparent",
+            fontWeight: "600",
+            cursor: "pointer",
+            transition: "all 0.2s"
+          }}
+          key={mode}
+          className={`btn-mode ${viewMode === mode ? "active" : ""}`}
+          onClick={() => setViewMode(mode)}
+          title={VIEW_MODE_LABELS[mode]}
+        >{label}
+        </button>
+      )
+    })
+  }
+
+  const renderActiveTitle = () => {
+    return VIEW_MODE_LABELS[viewMode]
+  }
+
+  const weekdays = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"]
+  const timeSlots = ["01.00", "04.00", "08.00", "13.00", "16.00", "20.00"]
+
+  const departments = ["QA", "Produksi", "Maintenance", "Logistik", "Engineering"]
+
   const [ngModal, setNgModal] = useState<{
     date?: number
     weekIndex?: number
     dayIndex?: number
     checkpoint: any
     shift: "A" | "B"
-    type: "daily" | "cc-stripping" | "daily-check-ins" | "cs-remove-tool" | "pressure-jig"
+    type: ViewMode
     notes: string
     department: string
   } | null>(null)
 
-  const departments = ["QA", "Produksi", "Maintenance", "Logistik", "Engineering"]
-
-  // === EFFECT UNTUK RESET SELECTED WEEK SAAT BULAN BERUBAH ===
   useEffect(() => {
     setSelectedWeek(1)
   }, [activeMonth, activeYear])
@@ -1099,24 +1516,52 @@ export default function PreAssyGLStatusPage() {
         }}
         className="page-content"
       >
-        {/* === HEADER DENGAN JUDUL AKTIF === */}
         <div className="header">
-            <h1>
-              {renderActiveTitle()}
-            </h1>
-            <div className="role-info">
-              Role:
-              <span className="role-badge">
-                {user.role === "group-leader-qa" ? "Group Leader" : "Inspector"}
-              </span>
-            </div>
+          <h1>{renderActiveTitle()}</h1>
+          <div className="role-info">
+            <span>Role:</span>
+            <span className="role-badge">
+              {user.role === "group-leader-qa" ? "Group Leader" : "Inspector"}
+            </span>
+          </div>
         </div>
-        {/* === BUTTON GROUP FILTERED BY ROLE === */}
+
         <div className="button-group">
           {renderViewModeButtons()}
         </div>
-        {/* === NAVIGASI BULAN - DITAMPILKAN UNTUK cc-stripping DAN pressure-jig === */}
-        {(viewMode === "cc-stripping" || viewMode === "pressure-jig" || 
+
+        {/* ERROR MESSAGE */}
+        {error && (
+          <div style={{ 
+            backgroundColor: '#fee', 
+            color: '#c33', 
+            padding: '12px', 
+            borderRadius: '8px', 
+            marginBottom: '15px',
+            borderLeft: '4px solid #c33'
+          }}>
+            <strong>Error:</strong> {error}
+          </div>
+        )}
+
+        {/* LOADING INDICATOR */}
+        {isLoading && (
+          <div style={{ textAlign: 'center', padding: '20px' }}>
+            <div style={{ 
+              display: 'inline-block', 
+              width: '40px', 
+              height: '40px', 
+              border: '4px solid #1976d2', 
+              borderTopColor: 'transparent', 
+              borderRadius: '50%', 
+              animation: 'spin 1s linear infinite' 
+            }}></div>
+            <p style={{ marginTop: '10px', color: '#666' }}>Memuat data...</p>
+          </div>
+        )}
+
+        {/* NAVIGASI BULAN */}
+        {(viewMode === "cc-stripping" || viewMode === "pressure-jig" ||
           viewMode === "daily-check-ins" || viewMode === "cs-remove-tool") && (
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
             <button
@@ -1140,7 +1585,6 @@ export default function PreAssyGLStatusPage() {
                 {getMonthName(activeMonth)} {activeYear}
               </span>
               
-              {/* Week selector hanya untuk cc-stripping */}
               {viewMode === "cc-stripping" && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginLeft: '10px' }}>
                   <span style={{ fontWeight: 'bold', fontSize: '1rem' }}>Minggu ke:</span>
@@ -1185,7 +1629,7 @@ export default function PreAssyGLStatusPage() {
           </div>
         )}
 
-{/* ============TABE===========L */}
+        {/* TABLE WRAPPER */}
         <div className="table-wrapper">
           <table className="status-table">
             <thead>
@@ -1347,8 +1791,6 @@ export default function PreAssyGLStatusPage() {
               ) : null}
             </thead>
             <tbody>
-              {/* ... isi tabel tetap sama seperti sebelumnya ... */}
-              {/* Saya akan menampilkan bagian body tabel untuk setiap viewMode */}
               
               {viewMode === "daily" ? (
                 Array.from({ length: 14 }, (_, i) => i + 1).map((id) => {
@@ -1491,24 +1933,13 @@ export default function PreAssyGLStatusPage() {
                         </td>
                         {getSelectedWeekDays.flatMap((day, dayIndex) => 
                           timeSlots.map((timeSlot) => {
-                            const isActive = isTimeSlotActive(day.date, timeSlot)
                             return (
                               <td key={`${dayIndex}-${timeSlot}-A`} className="col-time-cell" style={{ 
                                 textAlign: 'center',
                                 padding: '5px',
                                 verticalAlign: 'middle'
                               }}>
-                                {isActive ? (
-                                  renderStatusCell(day.date, shiftA!, timeSlot)
-                                ) : (
-                                  <span className="status-badge status-badge-past text-xs px-1 py-0.5 rounded" style={{ 
-                                    display: 'inline-block',
-                                    width: '100%',
-                                    height: '100%'
-                                  }}>
-                                    -
-                                  </span>
-                                )}
+                                {renderStatusCell(day.date, shiftA!, timeSlot)}
                               </td>
                             )
                           })
@@ -1517,24 +1948,13 @@ export default function PreAssyGLStatusPage() {
                       <tr>
                         {getSelectedWeekDays.flatMap((day, dayIndex) => 
                           timeSlots.map((timeSlot) => {
-                            const isActive = isTimeSlotActive(day.date, timeSlot)
                             return (
                               <td key={`${dayIndex}-${timeSlot}-B`} className="col-time-cell" style={{ 
                                 textAlign: 'center',
                                 padding: '5px',
                                 verticalAlign: 'middle'
                               }}>
-                                {isActive ? (
-                                  renderStatusCell(day.date, shiftB!, timeSlot)
-                                ) : (
-                                  <span className="status-badge status-badge-past text-xs px-1 py-0.5 rounded" style={{ 
-                                    display: 'inline-block',
-                                    width: '100%',
-                                    height: '100%'
-                                  }}>
-                                    -
-                                  </span>
-                                )}
+                                {renderStatusCell(day.date, shiftB!, timeSlot)}
                               </td>
                             )
                           })
@@ -1838,13 +2258,13 @@ export default function PreAssyGLStatusPage() {
         </div>
       </div>
 
-      {/* === MODAL NG === */}
+      {/* MODAL NG */}
       {ngModal && (
         <div className="ng-modal-overlay">
           <div className="ng-modal">
             <h3>Edit Laporan Kondisi NG</h3>
             <div className="ng-form-group">
-              <label>Keterangan NG: </label>
+              <label>Keterangan NG:</label>
               <textarea
                 value={ngModal.notes}
                 onChange={(e) => setNgModal({ ...ngModal, notes: e.target.value })}
@@ -1853,7 +2273,7 @@ export default function PreAssyGLStatusPage() {
               />
             </div>
             <div className="ng-form-group">
-              <label>Departemen Tujuan: </label>
+              <label>Departemen Tujuan:</label>
               <select
                 value={ngModal.department}
                 onChange={(e) => setNgModal({ ...ngModal, department: e.target.value })}
@@ -1872,6 +2292,10 @@ export default function PreAssyGLStatusPage() {
       )}
 
       <style jsx>{`
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+        
         .page-content {
           max-width: 1800px;
           padding-left: 95px;
@@ -1914,6 +2338,24 @@ export default function PreAssyGLStatusPage() {
           background: #f8fbff;
           border-radius: 8px;
           border: 1px solid #e0e0e0;
+        }
+        .btn-mode {
+          padding: 10px 20px;
+          border: 2px solid transparent;
+          border-radius: 6px;
+          background: #e3f2fd;
+          color: #1976d2;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.2s;
+        }
+        .btn-mode:hover {
+          background: #bbdefb;
+        }
+        .btn-mode.active {
+          background: #1976d2;
+          color: white;
+          border-color: #0d47a1;
         }
         .month-header {
           text-align: center;
@@ -2003,10 +2445,34 @@ export default function PreAssyGLStatusPage() {
           height: 36px;
           padding: 2px;
         }
+
+        /* =====================================================================
+           === CSS BARU UNTUK DROPDOWN DAN BADGE ===
+           ===================================================================== */
+        .status-dropdown {
+          width: 100%;
+          height: 100%;
+          border: none;
+          cursor: pointer;
+          font-weight: 500;
+          font-size: 12px;
+          text-align: center;
+          appearance: none;
+          -webkit-appearance: none;
+          -moz-appearance: none;
+        }
+        .status-dropdown option {
+          text-align: center;
+        }
         .status-badge {
           display: inline-block;
           width: 100%;
           height: 100%;
+          padding: 4px 8px;
+          border-radius: 4px;
+          font-weight: 500;
+          font-size: 12px;
+          text-align: center;
         }
         .status-badge-ok {
           background: #4caf50;
@@ -2017,15 +2483,9 @@ export default function PreAssyGLStatusPage() {
           color: white;
           cursor: pointer;
         }
-        .status-badge-check {
-          background: #1e88e5;
-          color: white;
-          display: inline;
-        }
-        .status-badge-past {
-          background: #bdbdbd;
-          color: #333;
-          font-weight: bold;
+        .status-badge-locked {
+          opacity: 0.7;
+          cursor: not-allowed;
         }
         .bg-gray-200 {
           background-color: #e0e0e0 !important;
@@ -2033,6 +2493,8 @@ export default function PreAssyGLStatusPage() {
         .bg-gray-100 {
           background-color: #f5f5f5 !important;
         }
+
+        /* MODAL STYLES */
         .ng-modal-overlay {
           position: fixed;
           top: 0;
@@ -2059,7 +2521,7 @@ export default function PreAssyGLStatusPage() {
         .ng-form-group {
           margin-bottom: 15px;
         }
-        .ng-form-group label { 
+        .ng-form-group label {
           display: block;
           margin-bottom: 5px;
           font-weight: 600;
@@ -2091,6 +2553,8 @@ export default function PreAssyGLStatusPage() {
           background: #1976d2;
           color: white;
         }
+        
+        /* [Copy semua style lainnya dari kode asli] */
       `}</style>
     </>
   )

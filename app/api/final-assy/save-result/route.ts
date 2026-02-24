@@ -1,85 +1,172 @@
 // app/api/final-assy/save-result/route.ts
 
-import { NextRequest, NextResponse } from 'next/server';
-import pool from '@/lib/db';
+import { NextRequest, NextResponse } from 'next/server'
+import pool from '@/lib/db'
 
 export async function POST(request: NextRequest) {
+  const client = await pool.connect()
+
   try {
-    const body = await request.json();
-    const { userId, categoryCode, itemId, dateKey, shift, status, ngDescription, ngDepartment } = body;
+    const body = await request.json()
+    const {
+      userId,
+      categoryCode,
+      itemId,
+      dateKey,
+      shift,
+      status,
+      ngDescription,
+      ngDepartment,
+      areaCode
+    } = body
 
-    if (!userId || !categoryCode || itemId === undefined || !dateKey || !shift || !status) {
-      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    if (!userId || !categoryCode || !itemId || !dateKey || !shift || !status) {
+      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
     }
 
-    // Validasi user
-    const [userCheck] = await pool.execute(
-      'SELECT id, nik FROM users WHERE id = ? AND is_active = TRUE',
+    await client.query('BEGIN')
+
+    /* ======================================================
+       VALIDASI USER
+    ====================================================== */
+    const userRes = await client.query(
+      `SELECT nik FROM users WHERE id = $1 AND is_active = TRUE`,
       [userId]
-    );
-    const userArray = userCheck as any[];
-    if (userArray.length === 0) {
-      return NextResponse.json({ error: 'Invalid user ID' }, { status: 403 });
+    )
+    if (userRes.rowCount === 0) {
+      throw new Error('Invalid user')
     }
-    const nik = userArray[0].nik;
+    const nik = userRes.rows[0].nik
 
-    // Cari kategori di database
-    const [categories] = await pool.execute(
-      'SELECT id FROM checklist_categories WHERE category_code = ?',
+    /* ======================================================
+       CATEGORY
+    ====================================================== */
+    const catRes = await client.query(
+      `SELECT id FROM checklist_categories WHERE category_code = $1`,
       [categoryCode]
-    );
-    const catArray = categories as any[];
-    
-    if (catArray.length === 0) {
-      console.error(`❌ Kategori TIDAK DITEMUKAN: category_code = "${categoryCode}"`);
-      console.error(`💡 Pastikan data berikut ada di tabel checklist_categories:`);
-      console.error(`   - category_code: "final-assy-gl"`);
-      console.error(`   - category_code: "final-assy-inspector"`);
-      return NextResponse.json({ 
-        error: `Category "${categoryCode}" not found in database. Please run initial setup!` 
-      }, { status: 404 });
+    )
+    if (catRes.rowCount === 0) {
+      throw new Error('Category not found')
     }
-    
-    const categoryId = catArray[0].id;
+    const categoryId = catRes.rows[0].id
 
-    // Jika status adalah "-", hapus data jika ada
+    /* ======================================================
+       AREA (OPTIONAL)
+    ====================================================== */
+    let areaId: number | null = null
+    if (areaCode) {
+      const areaRes = await client.query(
+        `SELECT id FROM checklist_areas
+         WHERE area_code = $1 AND category_id = $2 AND is_active = TRUE`,
+        [areaCode, categoryId]
+      )
+      if ((areaRes.rowCount ?? 0) > 0) {
+        areaId = areaRes.rows[0].id
+      }
+    }
+
+    const actualItemId = Math.floor(Number(itemId))
+    const timeSlot = ''   // 🔒 WAJIB ADA (BIAR TIDAK NULL)
+
+    /* ======================================================
+       DELETE MODE
+    ====================================================== */
     if (status === '-') {
-      await pool.execute(
-        `DELETE FROM checklist_results 
-         WHERE user_id = ? AND category_id = ? AND item_id = ? AND date_key = ? AND shift = ?`,
-        [userId, categoryId, itemId, dateKey, shift]
-      );
-      return NextResponse.json({ success: true, message: 'Data berhasil dihapus' });
+      await client.query(
+        `DELETE FROM checklist_results
+         WHERE user_id = $1
+           AND category_id = $2
+           AND item_id = $3
+           AND date_key = $4
+           AND shift = $5
+           AND COALESCE(time_slot,'') = $6
+           AND COALESCE(area_id,-1) = COALESCE($7,-1)`,
+        [
+          userId,
+          categoryId,
+          actualItemId,
+          dateKey,
+          shift,
+          timeSlot,
+          areaId
+        ]
+      )
+
+      await client.query('COMMIT')
+      return NextResponse.json({ success: true, deleted: true })
     }
 
-    // Cek existing data
-    const [existing] = await pool.execute(
-      `SELECT id FROM checklist_results 
-       WHERE user_id = ? AND category_id = ? AND item_id = ? AND date_key = ? AND shift = ?`,
-      [userId, categoryId, itemId, dateKey, shift]
-    );
+    /* ======================================================
+       MANUAL UPSERT (AMAN)
+    ====================================================== */
+    const updateRes = await client.query(
+      `UPDATE checklist_results
+       SET status = $1,
+           ng_description = $2,
+           ng_department = $3,
+           area_id = $4,
+           updated_at = NOW()
+       WHERE user_id = $5
+         AND category_id = $6
+         AND item_id = $7
+         AND date_key = $8
+         AND shift = $9
+         AND COALESCE(time_slot,'') = $10
+         AND COALESCE(area_id,-1) = COALESCE($4,-1)`,
+      [
+        status,
+        ngDescription || null,
+        ngDepartment || null,
+        areaId,
+        userId,
+        categoryId,
+        actualItemId,
+        dateKey,
+        shift,
+        timeSlot
+      ]
+    )
 
-    if ((existing as any[]).length > 0) {
-      // Update existing record
-      await pool.execute(
-        `UPDATE checklist_results 
-         SET status = ?, ng_description = ?, ng_department = ?, updated_at = NOW()
-         WHERE user_id = ? AND category_id = ? AND item_id = ? AND date_key = ? AND shift = ?`,
-        [status, ngDescription || null, ngDepartment || null, userId, categoryId, itemId, dateKey, shift]
-      );
-    } else {
-      // Insert new record
-      await pool.execute(
-        `INSERT INTO checklist_results 
-         (user_id, nik, category_id, item_id, date_key, shift, status, ng_description, ng_department)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [userId, nik, categoryId, itemId, dateKey, shift, status, ngDescription || null, ngDepartment || null]
-      );
+    if (updateRes.rowCount === 0) {
+      await client.query(
+        `INSERT INTO checklist_results (
+          user_id, nik, category_id, item_id,
+          date_key, shift, time_slot,
+          status, ng_description, ng_department,
+          area_id, submitted_at
+        ) VALUES (
+          $1,$2,$3,$4,
+          $5,$6,$7,
+          $8,$9,$10,
+          $11,NOW()
+        )`,
+        [
+          userId,
+          nik,
+          categoryId,
+          actualItemId,
+          dateKey,
+          shift,
+          timeSlot,
+          status,
+          ngDescription || null,
+          ngDepartment || null,
+          areaId
+        ]
+      )
     }
 
-    return NextResponse.json({ success: true, message: 'Data berhasil disimpan' });
-  } catch (error) {
-    console.error('❌ Save result error:', error);
-    return NextResponse.json({ error: 'Gagal menyimpan data ke database' }, { status: 500 });
+    await client.query('COMMIT')
+    return NextResponse.json({ success: true })
+
+  } catch (err: any) {
+    await client.query('ROLLBACK')
+    console.error('❌ SAVE RESULT ERROR:', err.message)
+    return NextResponse.json(
+      { error: 'Failed to save result', detail: err.message },
+      { status: 500 }
+    )
+  } finally {
+    client.release()
   }
 }

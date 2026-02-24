@@ -1,0 +1,123 @@
+├── app
+│   ├── api
+│   │   ├── auth
+│   │   │   ├── login
+│   │   │   │   ├── route.ts
+│   │   │   ├── signup
+│   │   │   │   ├── route.ts
+│   │   ├── dashboard
+│   │   │   ├── get-categories
+│   │   │   │   ├── route.ts
+│   │   │   ├── get-data
+│   │   │   │   ├── route.ts
+│   │   ├── final-assy
+│   │   │   ├── get-checklist-items
+│   │   │   │   ├── route.ts
+│   │   │   ├── get-results
+│   │   │   │   ├── route.ts
+│   │   │   ├── get-signatures
+│   │   │   │   ├── route.ts
+│   │   │   ├── save-result
+│   │   │   │   ├── route.ts
+│   │   │   ├── save-signature
+│   │   │   │   ├── route.ts
+│   │   ├── pre-assy
+│   │   │   ├── get-results
+│   │   │   │   ├── route.ts
+│   │   │   ├── get-signatures
+│   │   │   │   ├── route.ts
+│   │   │   ├── save-result
+│   │   │   │   ├── route.ts
+│   │   │   ├── save-signature
+│   │   │   │   ├── route.ts
+│   ├── cs-remove-tool
+│   │   ├── page.tsx
+│   ├── dashboard
+│   │   ├── page.tsx
+│   ├── gl-dashboard
+│   │   ├── page.tsx
+│   ├── home
+│   │   ├── page.tsx
+│   │   ├── page.txt
+│   ├── login-page
+│   │   ├── page_b.tsx
+│   │   ├── page.tsx
+│   ├── pelaporan
+│   │   ├── page-wrapper.tsx
+│   │   ├── page.tsx
+│   │   ├── pelaporan-content.tsx
+│   ├── pelaporan-list
+│   │   ├── page-content.tsx
+│   │   ├── page-wrapper.tsx
+│   │   ├── page.tsx
+│   ├── qa-dashboard
+│   │   ├── page.tsx
+│   │   ├── page.txt
+│   ├── signup-page
+│   │   ├── page.tsx
+│   ├── status-final-assy
+│   │   ├── page_backup.tsx
+│   │   ├── page.tsx
+│   │   ├── page.txt
+│   ├── status-pre-assy
+│   │   ├── page_b.tsx
+│   │   ├── page_backup.tsx
+│   │   ├── page.tsx
+│   │   ├── page.tsx.orig
+│   │   ├── page.txt
+│   ├── favicon.ico
+│   ├── globals.css
+│   ├── globals.txt
+│   ├── layout.tsx
+│   ├── page.tsx
+├── components
+│   ├── ui
+│   │   ├── detailmodal.tsx
+│   ├── chat-component.tsx
+│   ├── navbar-fixed.tsx
+│   ├── navbar-static.tsx
+│   ├── Sidebar.tsx
+│   ├── Sidebar.txt
+│   ├── theme-provider.tsx
+├── hooks
+│   ├── use-mobile.ts
+│   ├── use-toast.ts
+├── lib
+│   ├── auth-context.tsx
+│   ├── auth.ts
+│   ├── db-helpers.ts
+│   ├── db.ts
+│   ├── utils.ts
+├── migration
+│   ├── schema.sql
+├── public
+│   ├── apple-icon.png
+│   ├── file.svg
+│   ├── globe.svg
+│   ├── icon-dark-32x32.png
+│   ├── icon-light-32x32.png
+│   ├── icon.svg
+│   ├── next.svg
+│   ├── placeholder-logo.png
+│   ├── placeholder-logo.svg
+│   ├── placeholder-user.jpg
+│   ├── placeholder.jpg
+│   ├── placeholder.svg
+│   ├── vercel.svg
+│   ├── window.svg
+├── .env.local
+├── .gitignore
+├── components.json
+├── daftar-kode.txt
+├── eslint.config.mjs
+├── next-env.d.ts
+├── next.config.mjs
+├── next.config.ts
+├── package-lock.json
+├── package.json
+├── pnpm-lock.yaml
+├── postcss.config.mjs
+├── struktur-database.txt
+├── struktur-projek.txt
+├── tailwind.config.ts
+├── tsconfig.json

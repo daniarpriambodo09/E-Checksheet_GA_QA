@@ -158,14 +158,6 @@ export default function ModernHomePage() {
         gradient: "linear-gradient(135deg, #f093fb 0%, #f5576c 100%)",
         href: "/status-pre-assy?subType=inspector-qa",
       },
-      {
-        id: "pressure-jig",
-        icon: Wrench,
-        title: "Pressure Jig",
-        description: "Check Pressure Jig",
-        gradient: "linear-gradient(135deg, #fa709a 0%, #fee140 100%)",
-        href: "/status-pre-assy-pressure-jig",
-      },
     ],
     "inspector-ga": [
       {

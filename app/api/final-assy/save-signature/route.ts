@@ -1,80 +1,180 @@
 // app/api/final-assy/save-signature/route.ts
-
 import { NextRequest, NextResponse } from 'next/server';
 import pool from '@/lib/db';
+
+interface User {
+  id: string;
+  username: string;
+  full_name: string;
+  nik: string;
+  department: string;
+  role: string;
+}
+
+interface Category {
+  id: number;
+}
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { userId, categoryCode, dateKey, shift, signatureStatus, tableType } = body;
+    const { userId, categoryCode, dateKey, shift, signatureStatus, tableType, areaCode } = body;
 
-    if (!userId || !categoryCode || !dateKey || !shift || !signatureStatus || !tableType) {
+    // Validasi required fields
+    if (!userId || !categoryCode || !dateKey || !shift || !signatureStatus) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    // Validasi user
-    const [userCheck] = await pool.execute(
-      'SELECT id, nik FROM users WHERE id = ? AND is_active = TRUE',
+    // =========================================================
+    // 🔹 VALIDASI USER
+    // =========================================================
+    const users = await pool.query<User>(
+      'SELECT id, username, full_name, nik, department, role FROM users WHERE id = $1 AND is_active = TRUE',
       [userId]
     );
-    const userArray = userCheck as any[];
-    if (userArray.length === 0) {
+
+    if (users.rows.length === 0) {
       return NextResponse.json({ error: 'Invalid user ID' }, { status: 403 });
     }
-    const nik = userArray[0].nik;
 
-    // Cari kategori di database
-    const [categories] = await pool.execute(
-      'SELECT id FROM checklist_categories WHERE category_code = ?',
+    const nik = users.rows[0].nik;
+
+    // =========================================================
+    // 🔹 VALIDASI CATEGORY
+    // =========================================================
+    const categories = await pool.query<Category>(
+      'SELECT id FROM checklist_categories WHERE category_code = $1',
       [categoryCode]
     );
-    const catArray = categories as any[];
-    if (catArray.length === 0) {
-      console.error(`❌ Kategori tidak ditemukan: ${categoryCode}`);
-      return NextResponse.json({ 
-        error: `Category "${categoryCode}" not found. Please run initial setup!` 
+
+    if (categories.rows.length === 0) {
+      return NextResponse.json({
+        error: `Category "${categoryCode}" not found in database.`
       }, { status: 404 });
     }
-    const categoryId = catArray[0].id;
 
-    // Jika signature status adalah "-", hapus data jika ada
-    if (signatureStatus === '-') {
-      await pool.execute(
-        `DELETE FROM checklist_signatures 
-         WHERE user_id = ? AND category_id = ? AND date_key = ? AND shift = ?`,
-        [userId, categoryId, dateKey, shift]
+    const categoryId = categories.rows[0].id;
+
+    // =========================================================
+    // 🔹 RESOLVE AREA_ID DARI AREA_CODE (OPTIONAL)
+    // =========================================================
+    let areaId: number | null = null;
+    if (areaCode) {
+      const areaResult = await pool.query(
+        `SELECT id FROM checklist_areas 
+         WHERE area_code = $1 AND category_id = $2 AND is_active = TRUE`,
+        [areaCode, categoryId]
       );
-      return NextResponse.json({ success: true, message: 'Tanda tangan berhasil dihapus' });
+      if (areaResult.rows.length > 0) {
+        areaId = areaResult.rows[0].id;
+      }
     }
 
-    // Cek existing signature
-    const [existing] = await pool.execute(
-      `SELECT id FROM checklist_signatures 
-       WHERE user_id = ? AND category_id = ? AND date_key = ? AND shift = ?`,
-      [userId, categoryId, dateKey, shift]
-    );
+    // =========================================================
+    // 🔹 JIKA STATUS = "-", HAPUS DARI DATABASE
+    // =========================================================
+    if (signatureStatus === '-') {
+      if (areaId !== null) {
+        // Delete dengan filter area_id (match area_id yang sama atau NULL)
+        await pool.query(
+          `DELETE FROM checklist_signatures 
+           WHERE user_id = $1 
+             AND category_id = $2 
+             AND date_key = $3 
+             AND shift = $4 
+             AND (area_id = $5 OR area_id IS NULL)`,
+          [userId, categoryId, dateKey, shift, areaId]
+        );
+      } else {
+        // Delete tanpa filter area_id (hanya record dengan area_id NULL)
+        await pool.query(
+          `DELETE FROM checklist_signatures 
+           WHERE user_id = $1 
+             AND category_id = $2 
+             AND date_key = $3 
+             AND shift = $4 
+             AND area_id IS NULL`,
+          [userId, categoryId, dateKey, shift]
+        );
+      }
 
-    if ((existing as any[]).length > 0) {
-      // Update existing signature
-      await pool.execute(
-        `UPDATE checklist_signatures 
-         SET signature_status = ?, updated_at = NOW()
-         WHERE user_id = ? AND category_id = ? AND date_key = ? AND shift = ?`,
-        [signatureStatus, userId, categoryId, dateKey, shift]
+      return NextResponse.json({
+        success: true,
+        message: 'Signature berhasil dihapus',
+        deleted: true
+      });
+    }
+
+    // =========================================================
+    // 🔹 JIKA STATUS = "OK", SIMPAN/UPDATE KE DATABASE
+    // =========================================================
+    
+    // Cek existing signature dengan filter area_id yang konsisten
+    let existing;
+    if (areaId !== null) {
+      existing = await pool.query(
+        `SELECT id FROM checklist_signatures 
+         WHERE user_id = $1 
+           AND category_id = $2 
+           AND date_key = $3 
+           AND shift = $4 
+           AND (area_id = $5 OR area_id IS NULL)`,
+        [userId, categoryId, dateKey, shift, areaId]
       );
     } else {
-      // Insert new signature
-      await pool.execute(
-        `INSERT INTO checklist_signatures 
-         (user_id, nik, category_id, date_key, shift, signature_status)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [userId, nik, categoryId, dateKey, shift, signatureStatus]
+      existing = await pool.query(
+        `SELECT id FROM checklist_signatures 
+         WHERE user_id = $1 
+           AND category_id = $2 
+           AND date_key = $3 
+           AND shift = $4 
+           AND area_id IS NULL`,
+        [userId, categoryId, dateKey, shift]
       );
     }
 
-    return NextResponse.json({ success: true, message: 'Tanda tangan berhasil disimpan' });
+    if (existing.rows.length > 0) {
+      // ✅ UPDATE: Update existing signature dengan area_id
+      await pool.query(
+        `UPDATE checklist_signatures 
+         SET signature_status = $1, 
+             area_id = $2, 
+             updated_at = CURRENT_TIMESTAMP
+         WHERE user_id = $3 
+           AND category_id = $4 
+           AND date_key = $5 
+           AND shift = $6`,
+        [signatureStatus, areaId, userId, categoryId, dateKey, shift]
+      );
+
+      return NextResponse.json({
+        success: true,
+        message: 'Signature berhasil diupdate',
+        areaId,
+        action: 'updated'
+      });
+    } else {
+      // ✅ INSERT: Insert new signature dengan area_id
+      await pool.query(
+        `INSERT INTO checklist_signatures 
+         (user_id, nik, category_id, date_key, shift, signature_status, area_id, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)`,
+        [userId, nik, categoryId, dateKey, shift, signatureStatus, areaId]
+      );
+
+      return NextResponse.json({
+        success: true,
+        message: 'Signature berhasil disimpan',
+        areaId,
+        action: 'inserted'
+      });
+    }
+
   } catch (error) {
     console.error('❌ Save signature error:', error);
-    return NextResponse.json({ error: 'Gagal menyimpan tanda tangan' }, { status: 500 });
+    return NextResponse.json({
+      error: 'Gagal menyimpan signature ke database',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    }, { status: 500 });
   }
 }

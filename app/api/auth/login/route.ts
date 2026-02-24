@@ -1,4 +1,4 @@
-// app/api/auth/login.ts
+// app/api/auth/login/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import pool from '@/lib/db';
 import bcrypt from 'bcryptjs';
@@ -15,24 +15,30 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Cari user di database
-    const [users] = await pool.execute(
-      'SELECT id, username, full_name, nik, department, role, password_hash, is_active FROM users WHERE username = ?',
+    console.log('🔐 Login attempt for username:', username.trim());
+
+    // ✅ PostgreSQL: Gunakan $1, $2 dan pool.query().rows
+    const result = await pool.query(
+      `SELECT id, username, full_name, nik, department, role, password_hash, is_active 
+       FROM users 
+       WHERE username = $1`,
       [username.trim()]
     );
 
-    const userArray = users as any[];
-    if (userArray.length === 0) {
+    if (result.rows.length === 0) {
+      console.log('❌ Username not found:', username.trim());
       return NextResponse.json(
         { error: 'Username tidak ditemukan!' },
         { status: 401 }
       );
     }
 
-    const user = userArray[0];
+    const user = result.rows[0];
+    console.log('✅ User found:', user.username, 'Role:', user.role);
 
     // Cek status akun
     if (!user.is_active) {
+      console.log('⚠️ Account inactive:', user.username);
       return NextResponse.json(
         { error: 'Akun tidak aktif. Hubungi administrator.' },
         { status: 403 }
@@ -41,12 +47,16 @@ export async function POST(request: NextRequest) {
 
     // Verifikasi password
     const isPasswordValid = await bcrypt.compare(password, user.password_hash);
+    
     if (!isPasswordValid) {
+      console.log('❌ Invalid password for user:', user.username);
       return NextResponse.json(
         { error: 'Password salah!' },
         { status: 401 }
       );
     }
+
+    console.log('✅ Login successful:', user.username);
 
     // Return user data (tanpa password hash)
     return NextResponse.json(
@@ -64,7 +74,7 @@ export async function POST(request: NextRequest) {
       { status: 200 }
     );
   } catch (error) {
-    console.error('Login error:', error);
+    console.error('❌ Login error:', error);
     return NextResponse.json(
       { error: 'Terjadi kesalahan server. Silakan coba lagi.' },
       { status: 500 }

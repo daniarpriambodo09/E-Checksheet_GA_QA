@@ -28,422 +28,107 @@ ChartJS.register(
 );
 
 // ============================================
-// KATEGORI YANG TERSEDIA (DITAMBAHKAN PRE-ASSY + PRESSURE JIG)
+// TYPE DEFINITIONS
 // ============================================
-const CATEGORIES = [
-  "All Category",
-  // Final Assy Categories
-  "Daily Check Inspector Final Assy",
-  "Daily Check Group Leader Final Assy",
-  // Pre Assy Categories (BARU)
-  "Daily Check Group Leader Pre Assy",
-  "CallCheck CC & Stripping GL Pre Assy",
-  "Daily Check Ins. Inspector Pre Assy",
-  "CS Remove Tool Pre Assy",
-  "Daily Check Pressure Jig Inspector Pre Assy" // 🔹 BARU
-];
+interface CategoryOption {
+  label: string;
+  value: string;
+  type?: string;
+  area?: string;
+}
 
-// ============================================
-// MAPPING KATEGORI KE STORAGE KEY (DITAMBAHKAN PRE-ASSY + PRESSURE JIG)
-// ============================================
-const CATEGORY_STORAGE_MAP = {
-  // Final Assy (Existing)
-  "Daily Check Inspector Final Assy": {
-    storageKey: "finalAssy_inspector_DailyCheckResults",
-    type: "inspector"
-  },
-  "Daily Check Group Leader Final Assy": {
-    storageKey: "finalAssy_group-leader_DailyCheckResults",
-    type: "group-leader"
-  },
-  // Pre Assy (BARU)
-  "Daily Check Group Leader Pre Assy": {
-    storageKey: "preAssyGroupLeaderDailyCheckResults",
-    type: "group-leader"
-  },
-  "CallCheck CC & Stripping GL Pre Assy": {
-    storageKey: "preAssyGroupLeaderCcStrippingDailyCheckResults",
-    type: "group-leader"
-  },
-  "Daily Check Ins. Inspector Pre Assy": {
-    storageKey: "preAssyInspectorDailyCheckResults",
-    type: "inspector"
-  },
-  "CS Remove Tool Pre Assy": {
-    storageKey: "csRemoveControlResults",
-    type: "inspector"
-  },
-  // 🔹 BARU - Pressure Jig
-  "Daily Check Pressure Jig Inspector Pre Assy": {
-    storageKey: "preAssyPressureJigInspectorDailyCheckResults",
-    type: "inspector"
-  }
-};
+interface DashboardStats {
+  total: number;
+  completed: number;
+  pending: number;
+  completionRate: string;
+}
 
-// ============================================
-// HELPER FUNCTION: Parse tanggal dari dateKey
-// ============================================
-const parseDateFromKey = (dateKey: string): Date => {
-  const [year, month, day] = dateKey.split('-').map(Number);
-  return new Date(year, month - 1, day);
-};
+interface TrendItem {
+  date: string;
+  count: number;
+}
 
-// ============================================
-// HELPER FUNCTION: Parse info dari checkpointKey
-// ============================================
-const parseChecksheetInfo = (checkpointKey: string, category: string): {
+interface DistributionItem {
+  status: string;
+  count: number;
+  category: string;
+}
+
+interface UserItem {
+  name: string;
+  count: number;
+}
+
+interface HistoryItem {
+  filledAt: string;
+  area: string;
+  category: string;
   shift: string;
-  type: string;
-} => {
-  // Format checkpointKey: "id-shift" atau "id-shift-timeslot"
-  const parts = checkpointKey.split('-');
-  let shift = parts[1] || "Unknown";
-  
-  // Untuk CC & Stripping yang punya timeSlot
-  if (category === "CallCheck CC & Stripping GL Pre Assy" && parts.length > 2) {
-    shift = parts[1]; // shift tetap di index 1
+  status: string;
+  ngCount: number;
+  filledBy: string;
+}
+
+interface DashboardData {
+  success: boolean;
+  stats: DashboardStats;
+  trendData: TrendItem[];
+  distributionData: DistributionItem[];
+  topUsers: UserItem[];
+  historyData: HistoryItem[];
+}
+
+interface ChartDataset {
+  label: string;
+  data: number[];
+  borderColor?: string;
+  backgroundColor?: string | string[];
+  fill?: boolean;
+  tension?: number;
+  pointBackgroundColor?: string;
+  pointRadius?: number;
+  pointHoverRadius?: number;
+  borderRadius?: number;
+}
+
+interface ChartData {
+  labels: string[];
+  datasets: ChartDataset[];
+}
+
+// ============================================
+// HELPER FUNCTIONS
+// ============================================
+
+/**
+ * Generate last 7 days with proper date formatting
+ */
+const getLast7Days = () => {
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const date = new Date();
+    date.setDate(date.getDate() - i);
+    date.setHours(0, 0, 0, 0);
+    days.push(date);
   }
-  
-  // Determine type from category
-  const type = category.includes("Inspector") ? "inspector" : "group-leader";
-  return { shift, type };
+  return days;
 };
 
-// ============================================
-// AMBIL DATA DARI LOCALSTORAGE BERDASARKAN KATEGORI
-// ============================================
-const getResultsByCategory = (category: string) => {
-  if (category === "All Category") {
-    const allResults: any[] = [];
-    // Ambil semua kategori
-    Object.entries(CATEGORY_STORAGE_MAP).forEach(([catName, config]) => {
-      try {
-        const dataStr = localStorage.getItem(config.storageKey);
-        const data = dataStr ? JSON.parse(dataStr) : {};
-        Object.entries(data).forEach(([dateKey, checkpoints]: [string, any]) => {
-          Object.entries(checkpoints).forEach(([checkpointKey, result]: [string, any]) => {
-            allResults.push({
-              category: catName,
-              dateKey,
-              checkpointKey,
-              result,
-              type: config.type
-            });
-          });
-        });
-      } catch (error) {
-        console.error(`Error loading data for ${catName}:`, error);
-      }
-    });
-    return allResults;
-  }
-  
-  // Untuk kategori tertentu
-  const config = CATEGORY_STORAGE_MAP[category as keyof typeof CATEGORY_STORAGE_MAP];
-  if (!config) return [];
-  
-  try {
-    const dataStr = localStorage.getItem(config.storageKey);
-    const data = dataStr ? JSON.parse(dataStr) : {};
-    const results: any[] = [];
-    
-    Object.entries(data).forEach(([dateKey, checkpoints]: [string, any]) => {
-      Object.entries(checkpoints).forEach(([checkpointKey, result]: [string, any]) => {
-        results.push({
-          category,
-          dateKey,
-          checkpointKey,
-          result,
-          type: config.type
-        });
-      });
-    });
-    
-    return results;
-  } catch (error) {
-    console.error(`Error loading data for ${category}:`, error);
-    return [];
-  }
-};
+/**
+ * Merge 7-day default data with actual API data
+ */
+const mergeWith7DaysData = (apiData: TrendItem[]) => {
+  const last7Days = getLast7Days();
+  const dataMap = new Map(apiData.map(item => [
+    new Date(item.date).toDateString(),
+    item.count
+  ]));
 
-// ============================================
-// HITUNG STATISTIK BERDASARKAN KATEGORI (LOGIKA BARU)
-// ============================================
-const calculateStats = (category: string, activeMonth: number, activeYear: number) => {
-  const allData = getResultsByCategory(category);
-  
-  // Filter berdasarkan bulan aktif
-  const filteredData = allData.filter(item => {
-    const date = parseDateFromKey(item.dateKey);
-    return date.getMonth() === activeMonth && date.getFullYear() === activeYear;
-  });
-
-  if (filteredData.length === 0) {
-    return { total: 0, completed: 0, pending: 0, completionRate: "0.0" };
-  }
-
-  // 🔹 LANGKAH 1: Group by Date + Category untuk unique table count
-  const tablesByDate: Record<string, Set<string>> = {};
-  const tableStatuses: Record<string, Record<string, { hasOK: boolean; hasNG: boolean; ngCount: number }>> = {};
-  
-  filteredData.forEach(item => {
-    const { dateKey, category: itemCategory, checkpointKey, result } = item;
-    const tableKey = `${dateKey}_${itemCategory}`;
-    
-    // Initialize table tracking
-    if (!tablesByDate[dateKey]) {
-      tablesByDate[dateKey] = new Set();
-    }
-    tablesByDate[dateKey].add(itemCategory);
-    
-    // Track status per table
-    if (!tableStatuses[dateKey]) {
-      tableStatuses[dateKey] = {};
-    }
-    if (!tableStatuses[dateKey][itemCategory]) {
-      tableStatuses[dateKey][itemCategory] = { hasOK: false, hasNG: false, ngCount: 0 };
-    }
-    
-    // Update status
-    if (result.status === "OK") {
-      tableStatuses[dateKey][itemCategory].hasOK = true;
-    } else if (result.status === "NG") {
-      tableStatuses[dateKey][itemCategory].hasNG = true;
-      tableStatuses[dateKey][itemCategory].ngCount += result.ngCount || 1;
-    }
-  });
-
-  // 🔹 LANGKAH 2: Hitung Total Checklist (1 tabel per tanggal = +1)
-  const totalChecklist = Object.values(tablesByDate).reduce(
-    (sum, categories) => sum + categories.size,
-    0
-  );
-
-  // 🔹 LANGKAH 3: Hitung Completed (OK) - tabel yang SEMUA kolomnya OK
-  let completedChecklist = 0;
-  Object.entries(tableStatuses).forEach(([dateKey, categories]) => {
-    Object.entries(categories).forEach(([categoryName, status]) => {
-      // Completed jika ada OK dan TIDAK ADA NG
-      if (status.hasOK && !status.hasNG) {
-        completedChecklist++;
-      }
-    });
-  });
-
-  // 🔹 LANGKAH 4: Hitung Total NG (sum semua ngCount)
-  let totalNG = 0;
-  Object.values(tableStatuses).forEach(categories => {
-    Object.values(categories).forEach(status => {
-      totalNG += status.ngCount;
-    });
-  });
-
-  // 🔹 LANGKAH 5: Hitung Completion Rate
-  const completionRate = totalChecklist > 0
-    ? ((completedChecklist / totalChecklist) * 100).toFixed(1)
-    : "0.0";
-
-  return {
-    total: totalChecklist,
-    completed: completedChecklist,
-    pending: totalNG,
-    completionRate
-  };
-};
-
-// ============================================
-// HITUNG RATA-RATA PER HARI (7 HARI TERAKHIR) - DIPERBAIKI
-// ============================================
-const calculateAvgPerDay = (category: string) => {
-  const allData = getResultsByCategory(category);
-  const now = new Date();
-  const last7Days = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(now);
-    d.setDate(d.getDate() - i);
-    return d;
-  });
-
-  const dailyCounts: number[] = [];
-  last7Days.forEach(day => {
-    const dateKey = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
-    const dayData = allData.filter(item => item.dateKey === dateKey);
-    
-    // 🔹 Group by unique category per date (avoid double counting)
-    const uniqueCategories = new Set<string>();
-    dayData.forEach(item => {
-      uniqueCategories.add(item.category);
-    });
-
-    dailyCounts.push(uniqueCategories.size);
-  });
-
-  const avg = dailyCounts.reduce((sum, val) => sum + val, 0) / 7;
-  return avg.toFixed(1);
-};
-
-// ============================================
-// HITUNG TREND DATA 7 HARI TERAKHIR - DIPERBAIKI
-// ============================================
-const calculateTrendData = (category: string) => {
-  const allData = getResultsByCategory(category);
-  const now = new Date();
-  const days = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(now);
-    d.setDate(d.getDate() - i);
-    return d;
-  }).reverse();
-
-  const labels = days.map(d =>
-    d.toLocaleDateString("id-ID", { weekday: 'short', day: 'numeric' })
-  );
-
-  const dailyCounts = days.map(day => {
-    const dateKey = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
-    const dayData = allData.filter(item => item.dateKey === dateKey);
-    
-    // 🔹 Count unique categories per day
-    const uniqueCategories = new Set<string>();
-    dayData.forEach(item => {
-      uniqueCategories.add(item.category);
-    });
-
-    return uniqueCategories.size;
-  });
-
-  return { labels, data: dailyCounts };
-};
-
-// ============================================
-// HITUNG DISTRIBUSI PER KATEGORI
-// ============================================
-const calculateDistributionData = (category: string) => {
-  const allData = getResultsByCategory(category);
-  
-  if (category !== "All Category") {
-    // Untuk kategori tertentu, tampilkan OK vs NG
-    const okCount = allData.filter(item => item.result.status === "OK").length;
-    const ngCount = allData.filter(item => item.result.status === "NG").length;
-    
-    return {
-      labels: ["OK", "NG"],
-      data: [okCount, ngCount]
-    };
-  }
-  
-  // Untuk All Category, tampilkan per kategori
-  const categoryCounts: Record<string, number> = {};
-  allData.forEach(item => {
-    categoryCounts[item.category] = (categoryCounts[item.category] || 0) + 1;
-  });
-  
-  return {
-    labels: Object.keys(categoryCounts),
-    data: Object.values(categoryCounts)
-  };
-};
-
-// ============================================
-// HITUNG RASIO OK vs NG PER KATEGORI
-// ============================================
-const calculateRatioData = (category: string) => {
-  const allData = getResultsByCategory(category);
-  
-  if (category !== "All Category") {
-    // Untuk kategori tertentu, tampilkan rasio OK vs NG
-    const okCount = allData.filter(item => item.result.status === "OK").length;
-    const ngCount = allData.filter(item => item.result.status === "NG").length;
-    
-    return {
-      labels: [category],
-      datasets: [
-        {
-          label: "OK",
-          data: [okCount],
-          backgroundColor: "#10B981",
-          borderRadius: 4,
-        },
-        {
-          label: "NG",
-          data: [ngCount],
-          backgroundColor: "#F59E0B",
-          borderRadius: 4,
-        },
-      ],
-    };
-  }
-  
-  // Untuk All Category, hitung per kategori
-  const categoryMap: Record<string, { ok: number; ng: number }> = {};
-  allData.forEach(item => {
-    if (!categoryMap[item.category]) {
-      categoryMap[item.category] = { ok: 0, ng: 0 };
-    }
-    if (item.result.status === "OK") {
-      categoryMap[item.category].ok++;
-    } else {
-      categoryMap[item.category].ng++;
-    }
-  });
-  
-  const categories = Object.keys(categoryMap);
-  
-  return {
-    labels: categories,
-    datasets: [
-      {
-        label: "OK",
-        data: categories.map(cat => categoryMap[cat].ok),
-        backgroundColor: "#10B981",
-        borderRadius: 4,
-      },
-      {
-        label: "NG",
-        data: categories.map(cat => categoryMap[cat].ng),
-        backgroundColor: "#F59E0B",
-        borderRadius: 4,
-      },
-    ],
-  };
-};
-
-// ============================================
-// HITUNG TOP USERS
-// ============================================
-const calculateTopUsers = (category: string) => {
-  const allData = getResultsByCategory(category);
-  const userCount: Record<string, number> = {};
-  
-  allData.forEach(item => {
-    const userName = item.result.submittedBy || "Unknown";
-    userCount[userName] = (userCount[userName] || 0) + 1;
-  });
-  
-  return Object.entries(userCount)
-    .sort(([, a], [, b]) => b - a)
-    .slice(0, 5)
-    .map(([name, count]) => ({ name, count }));
-};
-
-// ============================================
-// BUAT RIWAYAT CHECKLIST
-// ============================================
-const createHistoryData = (category: string) => {
-  const allData = getResultsByCategory(category);
-  
-  return allData.map(item => {
-    // Parse info dari checkpointKey
-    const { shift } = parseChecksheetInfo(item.checkpointKey, item.category);
-    
-    return {
-      filledAt: item.result.submittedAt || new Date().toISOString(),
-      area: item.category.includes("Pre Assy") ? "Pre Assy" : "Final Assy",
-      category: item.category,
-      shift: shift,
-      status: item.result.status,
-      ngCount: item.result.ngCount || 0,
-      filledBy: item.result.submittedBy || "Unknown"
-    };
-  }).sort((a, b) => new Date(b.filledAt).getTime() - new Date(a.filledAt).getTime());
+  return last7Days.map(date => ({
+    date: date.toISOString(),
+    count: dataMap.get(date.toDateString()) || 0
+  }));
 };
 
 // ============================================
@@ -452,359 +137,741 @@ const createHistoryData = (category: string) => {
 export default function ModernDashboard() {
   const { user } = useAuth();
   
-  // State untuk filter kategori
-  const [selectedCategory, setSelectedCategory] = useState("All Category");
-  
-  // State untuk bulan aktif (sinkron dengan checksheet)
-  const [activeMonth, setActiveMonth] = useState(new Date().getMonth());
-  const [activeYear, setActiveYear] = useState(new Date().getFullYear());
-  
-  // Hitung statistik dengan useMemo untuk efisiensi
-  const stats = useMemo(() => {
-    return calculateStats(selectedCategory, activeMonth, activeYear);
-  }, [selectedCategory, activeMonth, activeYear]);
-  
-  const avgPerDay = useMemo(() => {
-    return calculateAvgPerDay(selectedCategory);
-  }, [selectedCategory]);
-  
-  const trendData = useMemo(() => {
-    const { labels, data } = calculateTrendData(selectedCategory);
+  // State
+  const [selectedCategory, setSelectedCategory] = useState<string>("All Category");
+  const [activeMonth, setActiveMonth] = useState<number>(new Date().getMonth());
+  const [activeYear, setActiveYear] = useState<number>(new Date().getFullYear());
+  const [categories, setCategories] = useState<CategoryOption[]>([]);
+  const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+  const [historyPage, setHistoryPage] = useState<number>(1);
+  const HISTORY_PER_PAGE = 10;
+
+  // Load categories on mount
+  useEffect(() => {
+    loadCategories();
+  }, []);
+
+  // Load dashboard data when filters change
+  useEffect(() => {
+    if (categories.length > 0) {
+      loadDashboardData();
+    }
+  }, [selectedCategory, activeMonth, activeYear, categories]);
+
+  // ============================================
+  // LOAD CATEGORIES
+  // ============================================
+  const loadCategories = async () => {
+    try {
+      const response = await fetch('/api/dashboard/get-categories');
+      if (!response.ok) throw new Error('Failed to load categories');
+      const data = await response.json();
+      setCategories(data.categories as CategoryOption[]);
+    } catch (error) {
+      console.error('Error loading categories:', error);
+      setError('Gagal memuat daftar kategori');
+    }
+  };
+
+  // ============================================
+  // LOAD DASHBOARD DATA
+  // ============================================
+  const loadDashboardData = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const monthKey = `${activeYear}-${String(activeMonth + 1).padStart(2, '0')}`;
+      const categoryParam = selectedCategory !== "All Category" 
+        ? `&categoryCode=${encodeURIComponent(selectedCategory)}` 
+        : '';
+      
+      const response = await fetch(
+        `/api/dashboard/get-data?month=${monthKey}${categoryParam}&days=7`
+      );
+
+      if (!response.ok) throw new Error('Failed to load dashboard data');
+      const data = await response.json();
+      setDashboardData(data as DashboardData);
+    } catch (error) {
+      console.error('Error loading dashboard data:', error);
+      setError('Gagal memuat data dashboard');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // ============================================
+  // MEMOIZED CALCULATIONS
+  // ============================================
+  const stats = useMemo<DashboardStats>(() => {
+    return dashboardData?.stats || { total: 0, completed: 0, pending: 0, completionRate: "0.0" };
+  }, [dashboardData]);
+
+  const trendData = useMemo<ChartData>(() => {
+    if (!dashboardData?.trendData) return { labels: [], datasets: [] };
+    
+    // Always show 7 days, fill missing with 0
+    const mergedData = mergeWith7DaysData(dashboardData.trendData);
+    
+    const labels = mergedData.map((item) => {
+      const date = new Date(item.date);
+      return date.toLocaleDateString("id-ID", { weekday: 'short', day: 'numeric' });
+    });
+
     return {
       labels,
       datasets: [{
         label: "Jumlah Checklist/Hari",
-        data,
+        data: mergedData.map((item) => Number(item.count)),
         borderColor: "#8B5CF6",
-        backgroundColor: "rgba(139, 92, 246, 0.1)",
+        backgroundColor: "rgba(139, 92, 246, 0.08)",
         fill: true,
-        tension: 0.4,
+        tension: 0.5,
         pointBackgroundColor: "#8B5CF6",
-        pointRadius: 4,
-      }],
+        pointRadius: 5,
+        pointHoverRadius: 7,
+        pointBorderColor: "#ffffff",
+        pointBorderWidth: 2
+      }]
     };
-  }, [selectedCategory]);
-  
-  const distributionData = useMemo(() => {
-    return calculateDistributionData(selectedCategory);
-  }, [selectedCategory]);
-  
-  const ratioData = useMemo(() => {
-    return calculateRatioData(selectedCategory);
-  }, [selectedCategory]);
-  
-  const topUsers = useMemo(() => {
-    return calculateTopUsers(selectedCategory);
-  }, [selectedCategory]);
-  
-  const historyData = useMemo(() => {
-    return createHistoryData(selectedCategory);
-  }, [selectedCategory]);
-  
+  }, [dashboardData]);
+
+  const distributionData = useMemo<{ labels: string[]; data: number[] }>(() => {
+    if (!dashboardData?.distributionData) return { labels: [], data: [] };
+
+    if (selectedCategory === "All Category") {
+      // Group by category
+      const categoryMap: Record<string, number> = {};
+      dashboardData.distributionData.forEach((item) => {
+        categoryMap[item.category] = (categoryMap[item.category] || 0) + item.count;
+      });
+      return {
+        labels: Object.keys(categoryMap),
+        data: Object.values(categoryMap)
+      };
+    } else {
+      // OK vs NG for specific category
+      const okCount = dashboardData.distributionData
+        .filter((item) => item.status === 'OK')
+        .reduce((sum, item) => sum + item.count, 0);
+      const ngCount = dashboardData.distributionData
+        .filter((item) => item.status === 'NG')
+        .reduce((sum, item) => sum + item.count, 0);
+      
+      return {
+        labels: ["OK", "NG"],
+        data: [okCount, ngCount]
+      };
+    }
+  }, [dashboardData, selectedCategory]);
+
+  const ratioData = useMemo<ChartData>(() => {
+    if (!dashboardData?.distributionData) return { labels: [], datasets: [] };
+
+    if (selectedCategory === "All Category") {
+      // Per category OK vs NG
+      const categoryMap: Record<string, { ok: number; ng: number }> = {};
+      dashboardData.distributionData.forEach((item) => {
+        if (!categoryMap[item.category]) {
+          categoryMap[item.category] = { ok: 0, ng: 0 };
+        }
+        if (item.status === 'OK') categoryMap[item.category].ok += item.count;
+        if (item.status === 'NG') categoryMap[item.category].ng += item.count;
+      });
+
+      const categories = Object.keys(categoryMap);
+      return {
+        labels: categories,
+        datasets: [
+          {
+            label: "OK",
+            data: categories.map(cat => categoryMap[cat].ok),
+            backgroundColor: "#10B981",
+            borderRadius: 4,
+          },
+          {
+            label: "NG",
+            data: categories.map(cat => categoryMap[cat].ng),
+            backgroundColor: "#F59E0B",
+            borderRadius: 4,
+          },
+        ],
+      };
+    } else {
+      // Single category OK vs NG
+      const okCount = dashboardData.distributionData
+        .filter((item) => item.status === 'OK')
+        .reduce((sum, item) => sum + item.count, 0);
+      const ngCount = dashboardData.distributionData
+        .filter((item) => item.status === 'NG')
+        .reduce((sum, item) => sum + item.count, 0);
+
+      return {
+        labels: [selectedCategory],
+        datasets: [
+          {
+            label: "OK",
+            data: [okCount],
+            backgroundColor: "#10B981",
+            borderRadius: 4,
+          },
+          {
+            label: "NG",
+            data: [ngCount],
+            backgroundColor: "#F59E0B",
+            borderRadius: 4,
+          },
+        ],
+      };
+    }
+  }, [dashboardData, selectedCategory]);
+
+  const topUsers = useMemo<UserItem[]>(() => {
+    return dashboardData?.topUsers || [];
+  }, [dashboardData]);
+
+  const historyData = useMemo<HistoryItem[]>(() => {
+    const data = dashboardData?.historyData || [];
+    // Sort by newest first (descending by filledAt)
+    return [...data].sort((a, b) => 
+      new Date(b.filledAt).getTime() - new Date(a.filledAt).getTime()
+    );
+  }, [dashboardData]);
+
+  const paginatedHistoryData = useMemo<HistoryItem[]>(() => {
+    const startIdx = (historyPage - 1) * HISTORY_PER_PAGE;
+    const endIdx = startIdx + HISTORY_PER_PAGE;
+    return historyData.slice(startIdx, endIdx);
+  }, [historyData, historyPage]);
+
+  const totalHistoryPages = Math.ceil(historyData.length / HISTORY_PER_PAGE);
+
   const userName = user?.fullName || "User";
-  
   if (!user) return null;
-  
+
+  // Helper function untuk nama bulan
+  const getMonthName = (monthIndex: number): string => {
+    const monthNames = [
+      "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+      "Juli", "Agustus", "September", "Oktober", "November", "Desember"
+    ];
+    return monthNames[monthIndex];
+  };
+
+  // Change month handler
+  const changeMonth = (direction: number) => {
+    let newMonth = activeMonth + direction;
+    let newYear = activeYear;
+    if (newMonth < 0) {
+      newMonth = 11;
+      newYear--;
+    } else if (newMonth > 11) {
+      newMonth = 0;
+      newYear++;
+    }
+    setActiveMonth(newMonth);
+    setActiveYear(newYear);
+  };
+
   return (
     <>
       <Sidebar userName={userName} />
-      
       <div className="dashboard-container">
         <main className="main-content">
-          <div className="header">
-            <div>
-              <h1 className="page-title">📊 QA Dashboard</h1>
-              <p className="page-subtitle">
-                Wawasan berbasis data untuk peningkatan kualitas inspeksi
-              </p>
+          <div className="header-section">
+            <div className="header-content">
+              <div className="header-text">
+                <h1 className="page-title">📊 QA Dashboard</h1>
+                <p className="page-subtitle">
+                  Wawasan berbasis data untuk peningkatan kualitas inspeksi
+                </p>
+              </div>
+              
+              {/* === DROPDOWN FILTER KATEGORI GLOBAL === */}
+              <div className="filter-container">
+                <label htmlFor="categoryFilter" className="filter-label">Filter Kategori:</label>
+                <select
+                  id="categoryFilter"
+                  value={selectedCategory}
+                  onChange={(e) => setSelectedCategory(e.target.value)}
+                  className="category-dropdown"
+                >
+                  {categories.map(cat => (
+                    <option key={cat.value} value={cat.value}>{cat.label}</option>
+                  ))}
+                </select>
+              </div>
             </div>
+          </div>
+
+          {/* === NAVIGASI BULAN === */}
+          <div className="month-navigation">
+            <button
+              onClick={() => changeMonth(-1)}
+              className="month-btn month-btn-prev"
+              title="Bulan sebelumnya"
+            >
+              ← Bulan Lalu
+            </button>
             
-            {/* === DROPDOWN FILTER KATEGORI GLOBAL === */}
-            <div className="filter-container">
-              <label htmlFor="categoryFilter" className="filter-label">Filter Kategori:</label>
-              <select
-                id="categoryFilter"
-                value={selectedCategory}
-                onChange={(e) => setSelectedCategory(e.target.value)}
-                className="category-dropdown"
-              >
-                {CATEGORIES.map(cat => (
-                  <option key={cat} value={cat}>{cat}</option>
-                ))}
-              </select>
-            </div>
+            <span className="month-display">
+              {getMonthName(activeMonth)} {activeYear}
+            </span>
+            
+            <button
+              onClick={() => changeMonth(1)}
+              className="month-btn month-btn-next"
+              title="Bulan berikutnya"
+            >
+              Bulan Depan →
+            </button>
           </div>
 
-          {/* Stats */}
-          <div className="stats-grid">
-            <div className="stat-card primary">
-              <div className="stat-value">{stats.total}</div>
-              <div className="stat-label">Total Checklist</div>
-            </div>
-            <div className="stat-card success">
-              <div className="stat-value">{stats.completed}</div>
-              <div className="stat-label">Selesai (OK)</div>
-            </div>
-            <div className="stat-card warning">
-              <div className="stat-value">{stats.pending}</div>
-              <div className="stat-label">Temuan (NG)</div>
-            </div>
-            <div className="stat-card info">
-              <div className="stat-value">{stats.completionRate}%</div>
-              <div className="stat-label">Tingkat Kelengkapan</div>
-            </div>
-            <div className="stat-card accent">
-              <div className="stat-value">{avgPerDay}</div>
-              <div className="stat-label">Rata-rata/Hari (7H)</div>
-            </div>
-          </div>
-
-          {stats.total > 0 && (
-            <div className="insight-banner">
-              <span className="insight-text">
-                📌 Performa {selectedCategory !== "All Category" ? selectedCategory : "semua kategori"}: <strong>{stats.completionRate}%</strong> checklist dalam kondisi OK.
-                {selectedCategory === "All Category" && " Fokus pada area dengan temuan NG tertinggi!"}
-              </span>
+          {/* === LOADING & ERROR === */}
+          {isLoading && (
+            <div style={{ textAlign: 'center', padding: '40px' }}>
+              <div style={{ 
+                display: 'inline-block', 
+                width: '60px', 
+                height: '60px', 
+                border: '6px solid #1976d2', 
+                borderTopColor: 'transparent', 
+                borderRadius: '50%', 
+                animation: 'spin 1s linear infinite' 
+              }}></div>
+              <p style={{ marginTop: '16px', color: '#666', fontSize: '1.1rem' }}>
+                Memuat data dashboard...
+              </p>
             </div>
           )}
 
-          <div className="chart-box large">
-            <h3 className="chart-title">📈 Aktivitas Checklist (7 Hari Terakhir)</h3>
-            <div className="chart-container large">
-              {trendData.labels.length > 0 ? (
-                <Line
-                  data={trendData}
-                  options={{
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                      legend: { display: true, position: "top" },
-                      tooltip: {
-                        callbacks: {
-                          label: (context) => `${context.dataset.label}: ${context.raw} checklist`
-                        }
-                      }
-                    },
-                    scales: {
-                      y: { beginAtZero: true, ticks: { stepSize: 1 } },
-                    },
-                  }}
-                />
-              ) : (
-                <p className="empty-chart">Belum ada data checklist.</p>
+          {error && (
+            <div style={{ 
+              backgroundColor: '#fee', 
+              color: '#c33', 
+              padding: '16px', 
+              borderRadius: '8px', 
+              marginBottom: '24px',
+              borderLeft: '4px solid #c33'
+            }}>
+              <strong>Error: </strong> {error}
+            </div>
+          )}
+
+          {!isLoading && !error && (
+            <>
+              {/* Stats */}
+              <div className="stats-grid">
+                <div className="stat-card primary">
+                  <div className="stat-icon">📋</div>
+                  <div className="stat-value">{stats.total}</div>
+                  <div className="stat-label">Total Checklist</div>
+                </div>
+                <div className="stat-card success">
+                  <div className="stat-icon">✓</div>
+                  <div className="stat-value">{stats.completed}</div>
+                  <div className="stat-label">Selesai (OK)</div>
+                </div>
+                <div className="stat-card warning">
+                  <div className="stat-icon">✗</div>
+                  <div className="stat-value">{stats.pending}</div>
+                  <div className="stat-label">Temuan (NG)</div>
+                </div>
+                <div className="stat-card info">
+                  <div className="stat-icon">📊</div>
+                  <div className="stat-value">{stats.completionRate}%</div>
+                  <div className="stat-label">Tingkat Kelengkapan</div>
+                </div>
+              </div>
+
+              {stats.total > 0 && (
+                <div className="insight-banner">
+                  <span className="insight-text">
+                    📌 Performa {selectedCategory !== "All Category" ? selectedCategory : "semua kategori"}: <strong>{stats.completionRate}%</strong> checklist dalam kondisi OK.
+                    {selectedCategory === "All Category" && " Fokus pada area dengan temuan NG tertinggi!"}
+                  </span>
+                </div>
               )}
-            </div>
-          </div>
 
-          <div className="charts-section">
-            <div className="chart-box">
-              <h3 className="chart-title">
-                {selectedCategory === "All Category"
-                  ? "🔍 Distribusi Jenis Checklist"
-                  : "🔍 Distribusi Status (OK vs NG)"}
-              </h3>
-              <div className="chart-container small">
-                {distributionData.labels.length > 0 ? (
-                  <Doughnut
-                    data={{
-                      labels: distributionData.labels,
-                      datasets: [{
-                        data: distributionData.data,
-                        backgroundColor: [
-                          "#8B5CF6", "#EC4899", "#10B981", "#F59E0B", "#3B82F6",
-                          "#EF4444", "#06B6D4", "#84CC16"
-                        ],
-                        borderWidth: 0,
-                      }],
-                    }}
-                    options={{
-                      responsive: true,
-                      maintainAspectRatio: false,
-                      plugins: {
-                        legend: { position: "bottom" },
-                        tooltip: {
-                          callbacks: {
-                            label: (context) => `${context.label}: ${context.raw} kali`
+              <div className="chart-box large">
+                <h3 className="chart-title">📈 Aktivitas Checklist (7 Hari Terakhir)</h3>
+                <div className="chart-container large">
+                  {trendData.labels.length > 0 && trendData.datasets[0].data.some(val => val > 0) ? (
+                    <Line
+                      data={trendData}
+                      options={{
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                          legend: { 
+                            display: true, 
+                            position: "top",
+                            labels: {
+                              font: {
+                                size: 12
+                              }
+                            }
+                          },
+                          tooltip: {
+                            callbacks: {
+                              label: (context) => `${context.dataset.label}: ${context.raw} checklist`
+                            }
                           }
-                        }
-                      },
-                    }}
-                  />
-                ) : (
-                  <p className="empty-chart">Belum ada data.</p>
-                )}
-              </div>
-            </div>
-
-            <div className="chart-box">
-              <h3 className="chart-title">⚖️ Rasio OK vs NG</h3>
-              <div className="chart-container">
-                {ratioData.labels.length > 0 ? (
-                  <Bar
-                    data={ratioData}
-                    options={{
-                      responsive: true,
-                      maintainAspectRatio: false,
-                      indexAxis: 'y',
-                      scales: {
-                        x: { stacked: true, beginAtZero: true },
-                        y: { stacked: true },
-                      },
-                      plugins: {
-                        legend: { position: "top" },
-                        tooltip: {
-                          callbacks: {
-                            label: (context) => `${context.dataset.label}: ${context.raw}`
+                        },
+                        scales: {
+                          y: { 
+                            beginAtZero: true, 
+                            ticks: { 
+                              stepSize: 1,
+                              precision: 0
+                            },
+                            grid: {
+                              color: 'rgba(0, 0, 0, 0.05)'
+                            }
+                          },
+                          x: {
+                            grid: {
+                              display: false
+                            }
                           }
-                        }
-                      }
-                    }}
-                  />
-                ) : (
-                  <p className="empty-chart">Belum ada data.</p>
-                )}
-              </div>
-            </div>
-
-            <div className="chart-box">
-              <h3 className="chart-title">🏆 Top 5 Pengisi Checklist</h3>
-              <div className="top-users">
-                {topUsers.length > 0 ? (
-                  topUsers.map((user, i) => (
-                    <div key={i} className="user-item">
-                      <div className="user-info">
-                        <span className="user-rank">#{i + 1}</span>
-                        <span className="user-name">{user.name}</span>
+                        },
+                      }}
+                    />
+                  ) : (
+                    <div style={{ 
+                      display: 'flex', 
+                      flexDirection: 'column', 
+                      alignItems: 'center', 
+                      justifyContent: 'center', 
+                      height: '100%',
+                      padding: '20px',
+                      textAlign: 'center'
+                    }}>
+                      <div style={{ 
+                        fontSize: '48px', 
+                        marginBottom: '16px',
+                        color: '#cbd5e1'
+                      }}>
+                        📉
                       </div>
-                      <span className="user-count">{user.count}</span>
+                      <p style={{ 
+                        fontSize: '16px', 
+                        color: '#64748b',
+                        marginBottom: '8px',
+                        fontWeight: 500
+                      }}>
+                        Belum ada data checklist
+                      </p>
+                      <p style={{ 
+                        fontSize: '14px', 
+                        color: '#94a3b8',
+                        maxWidth: '300px'
+                      }}>
+                        {selectedCategory === "All Category" 
+                          ? "Isi checklist pada halaman Final Assy atau Pre Assy untuk melihat aktivitas"
+                          : `Isi checklist "${selectedCategory}" untuk melihat aktivitas`
+                        }
+                      </p>
                     </div>
-                  ))
+                  )}
+                </div>
+              </div>
+
+              <div className="charts-section">
+                <div className="chart-box">
+                  <h3 className="chart-title">
+                    {selectedCategory === "All Category"
+                      ? "🔍 Distribusi Jenis Checklist"
+                      : "🔍 Distribusi Status (OK vs NG)"}
+                  </h3>
+                  <div className="chart-container small">
+                    {distributionData.labels.length > 0 ? (
+                      <Doughnut
+                        data={{
+                          labels: distributionData.labels,
+                          datasets: [{
+                            data: distributionData.data,
+                            backgroundColor: [
+                              "#8B5CF6", "#EC4899", "#10B981", "#F59E0B", "#3B82F6",
+                              "#EF4444", "#06B6D4", "#84CC16"
+                            ],
+                            borderWidth: 0,
+                          }],
+                        }}
+                        options={{
+                          responsive: true,
+                          maintainAspectRatio: false,
+                          plugins: {
+                            legend: { 
+                              position: "bottom",
+                            },
+                            tooltip: {
+                              callbacks: {
+                                label: (context) => `${context.label}: ${context.raw} kali`
+                              }
+                            }
+                          },
+                        }}
+                      />
+                    ) : (
+                      <p className="empty-chart">Belum ada data.</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="chart-box">
+                  <h3 className="chart-title">⚖️ Rasio OK vs NG</h3>
+                  <div className="chart-container">
+                    {ratioData.labels.length > 0 ? (
+                      <Bar
+                        data={ratioData}
+                        options={{
+                          responsive: true,
+                          maintainAspectRatio: false,
+                          indexAxis: 'y',
+                          scales: {
+                            x: { stacked: true, beginAtZero: true },
+                            y: { stacked: true },
+                          },
+                          plugins: {
+                            legend: { position: "top" },
+                            tooltip: {
+                              callbacks: {
+                                label: (context) => `${context.dataset.label}: ${context.raw}`
+                              }
+                            }
+                          }
+                        }}
+                      />
+                    ) : (
+                      <p className="empty-chart">Belum ada data.</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="chart-box">
+                  <h3 className="chart-title">🏆 Top 5 Pengisi Checklist</h3>
+                  <div className="top-users">
+                    {topUsers.slice(0, 5).length > 0 ? (
+                      topUsers.slice(0, 5).map((userItem, i) => {
+                        const maxCount = topUsers[0]?.count || 1;
+                        const progress = (userItem.count / maxCount) * 100;
+                        return (
+                          <div key={i} className="user-item">
+                            <div className="user-rank-badge">{i + 1}</div>
+                            <div className="user-content">
+                              <div className="user-header">
+                                <span className="user-name">{userItem.name}</span>
+                                <span className="user-count">{userItem.count}</span>
+                              </div>
+                              <div className="progress-bar">
+                                <div 
+                                  className="progress-fill" 
+                                  style={{ width: `${progress}%` }}
+                                ></div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <p className="empty-chart">Belum ada data.</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="section">
+                <div className="section-header">
+                  <h2 className="section-title">📜 Riwayat Checklist Lengkap</h2>
+                  {historyData.length > 0 && (
+                    <span className="record-count">Total: {historyData.length} records</span>
+                  )}
+                </div>
+                {historyData.length > 0 ? (
+                  <>
+                    <div className="history-table-container">
+                      <table className="history-table">
+                        <thead>
+                          <tr>
+                            <th>Tanggal & Waktu</th>
+                            <th>Area</th>
+                            <th>Jenis / Kategori</th>
+                            <th>Status</th>
+                            <th>Pengisi</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {paginatedHistoryData.map((item, i) => (
+                            <tr key={i}>
+                              <td>
+                                {new Date(item.filledAt).toLocaleString("id-ID", {
+                                  day: "2-digit",
+                                  month: "short",
+                                  year: "numeric",
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })}
+                              </td>
+                              <td>
+                                <span className={`area-badge ${item.area === "Pre Assy" ? "pre-assy" : "final-assy"}`}>
+                                  {item.area}
+                                </span>
+                              </td>
+                              <td>
+                                <div>{item.category}</div>
+                                <div style={{ fontSize: '0.8em', color: '#64748b' }}>
+                                  Shift {item.shift}
+                                </div>
+                              </td>
+                              <td>
+                                <span className={`status-badge ${item.status === "OK" ? "ok" : "ng"}`}>
+                                  {item.status}
+                                </span>
+                                {item.ngCount > 0 && (
+                                  <div style={{ fontSize: '0.8em', marginTop: '4px' }}>
+                                    <span style={{ color: '#F59E0B', fontWeight: 600 }}>
+                                      {item.ngCount} temuan NG
+                                    </span>
+                                  </div>
+                                )}
+                              </td>
+                              <td>{item.filledBy || "–"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {totalHistoryPages > 1 && (
+                      <div className="pagination-container">
+                        <button 
+                          className="pagination-btn"
+                          onClick={() => setHistoryPage(prev => Math.max(1, prev - 1))}
+                          disabled={historyPage === 1}
+                        >
+                          ← Back
+                        </button>
+                        <span className="pagination-info">
+                          Page {historyPage} of {totalHistoryPages}
+                        </span>
+                        <button 
+                          className="pagination-btn"
+                          onClick={() => setHistoryPage(prev => Math.min(totalHistoryPages, prev + 1))}
+                          disabled={historyPage === totalHistoryPages}
+                        >
+                          Next →
+                        </button>
+                      </div>
+                    )}
+                  </>
                 ) : (
-                  <p className="empty-chart">Belum ada data.</p>
+                  <p className="empty-activity">Belum ada riwayat checklist.</p>
                 )}
               </div>
-            </div>
-          </div>
-
-          <div className="section">
-            <h2 className="section-title">📜 Riwayat Checklist Lengkap</h2>
-            {historyData.length > 0 ? (
-              <div className="history-table-container">
-                <table className="history-table">
-                  <thead>
-                    <tr>
-                      <th>Tanggal & Waktu</th>
-                      <th>Area</th>
-                      <th>Jenis / Kategori</th>
-                      <th>Status</th>
-                      <th>Pengisi</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {historyData.map((item, i) => (
-                      <tr key={i}>
-                        <td>
-                          {new Date(item.filledAt).toLocaleString("id-ID", {
-                            day: "2-digit",
-                            month: "short",
-                            year: "numeric",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                        </td>
-                        <td>
-                          <span className={`area-badge ${item.area === "Pre Assy" ? "pre-assy" : "final-assy"}`}>
-                            {item.area}
-                          </span>
-                        </td>
-                        <td>
-                          <div>{item.category}</div>
-                          <div style={{ fontSize: '0.8em', color: '#64748b' }}>
-                            Shift {item.shift}
-                          </div>
-                        </td>
-                        <td>
-                          <span className={`status-badge ${item.status === "OK" ? "ok" : "ng"}`}>
-                            {item.status}
-                          </span>
-                          {item.ngCount > 0 && (
-                            <div style={{ fontSize: '0.8em', marginTop: '4px' }}>
-                              <span style={{ color: '#F59E0B', fontWeight: 600 }}>
-                                {item.ngCount} temuan NG
-                              </span>
-                            </div>
-                          )}
-                        </td>
-                        <td>{item.filledBy || "–"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <p className="empty-activity">Belum ada riwayat checklist.</p>
-            )}
-          </div>
+            </>
+          )}
         </main>
       </div>
 
+      {/* CSS Styles */}
       <style jsx>{`
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+
+        @keyframes slideInUp {
+          from {
+            opacity: 0;
+            transform: translateY(10px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        
         .dashboard-container {
           display: flex;
           min-height: 100vh;
-          background-color: #f8fafc;
+          background-color: #f5f7fa;
           font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         }
 
         .main-content {
           flex: 1;
-          padding: 24px;
+          padding: 32px;
           min-height: calc(100vh - 64px);
-          max-width: 1400px;
+          max-width: 1500px;
           margin: 0 auto;
-          padding-top: 20px;
+          width: 100%;
         }
 
-        .header {
-          margin-bottom: 28px;
+        /* HEADER SECTION */
+        .header-section {
+          background: linear-gradient(135deg, #1976d2 0%, #1565c0 100%);
+          border-radius: 16px;
+          padding: 32px;
+          margin-bottom: 32px;
+          box-shadow: 0 8px 24px rgba(25, 118, 210, 0.15);
+          color: white;
+        }
+
+        .header-content {
           display: flex;
           justify-content: space-between;
           align-items: center;
           flex-wrap: wrap;
-          gap: 20px;
+          gap: 24px;
+        }
+
+        .header-text {
+          flex: 1;
+          min-width: 250px;
         }
 
         .page-title {
-          font-size: 28px;
+          font-size: 32px;
           font-weight: 800;
-          color: #ffffff;
+          color: white;
           margin: 0;
+          letter-spacing: -0.5px;
         }
 
         .page-subtitle {
           font-size: 16px;
-          color: #ffffff;
-          margin-top: 4px;
+          color: rgba(255, 255, 255, 0.9);
+          margin-top: 8px;
+          opacity: 0.95;
         }
 
         .filter-container {
           display: flex;
           align-items: center;
-          gap: 12px;
+          gap: 14px;
           background: white;
-          padding: 12px 20px;
+          padding: 16px 24px;
           border-radius: 12px;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+          min-width: 300px;
         }
 
         .filter-label {
           font-weight: 600;
           color: #334155;
           margin: 0;
+          white-space: nowrap;
         }
 
         .category-dropdown {
-          padding: 8px 16px;
+          flex: 1;
+          padding: 10px 14px;
           border: 2px solid #e2e8f0;
           border-radius: 8px;
           font-size: 14px;
@@ -812,43 +879,118 @@ export default function ModernDashboard() {
           color: #1e293b;
           background-color: white;
           cursor: pointer;
-          transition: all 0.2s;
+          transition: all 0.2s ease;
+        }
+
+        .category-dropdown:hover {
+          border-color: #cbd5e1;
+          box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
         }
 
         .category-dropdown:focus {
           outline: none;
-          border-color: #8B5CF6;
-          box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1);
+          border-color: #1976d2;
+          box-shadow: 0 0 0 4px rgba(25, 118, 210, 0.1);
         }
 
+        /* MONTH NAVIGATION */
+        .month-navigation {
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          gap: 20px;
+          margin-bottom: 32px;
+          padding: 20px;
+          background: white;
+          border-radius: 14px;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+          animation: slideInUp 0.3s ease-out;
+        }
+
+        .month-btn {
+          padding: 12px 24px;
+          background: linear-gradient(135deg, #1976d2, #1565c0);
+          color: white;
+          border: none;
+          border-radius: 10px;
+          cursor: pointer;
+          font-weight: 600;
+          font-size: 15px;
+          transition: all 0.2s ease;
+          box-shadow: 0 2px 8px rgba(25, 118, 210, 0.2);
+        }
+
+        .month-btn:hover:not(:disabled) {
+          transform: translateY(-2px);
+          box-shadow: 0 4px 14px rgba(25, 118, 210, 0.3);
+        }
+
+        .month-btn:active:not(:disabled) {
+          transform: translateY(0);
+        }
+
+        .month-display {
+          font-size: 20px;
+          font-weight: 700;
+          color: #1e293b;
+          min-width: 180px;
+          text-align: center;
+        }
+
+        /* STATS GRID */
         .stats-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-          gap: 16px;
-          margin-bottom: 24px;
+          grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+          gap: 20px;
+          margin-bottom: 32px;
         }
 
         .stat-card {
           background: white;
           border-radius: 16px;
-          padding: 20px;
+          padding: 28px 24px;
           display: flex;
           flex-direction: column;
           align-items: center;
           justify-content: center;
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+          box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
           transition: all 0.3s ease;
-          border-left: 4px solid #cbd5e1;
+          border-left: 5px solid #cbd5e1;
+          position: relative;
+          overflow: hidden;
+          animation: fadeIn 0.4s ease-out;
+        }
+
+        .stat-card::before {
+          content: '';
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          height: 3px;
+          background: linear-gradient(90deg, transparent, currentColor, transparent);
+          opacity: 0;
+          transition: opacity 0.3s ease;
+        }
+
+        .stat-card:hover {
+          transform: translateY(-4px);
+          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
         }
 
         .stat-card.primary { border-left-color: #8B5CF6; }
         .stat-card.success { border-left-color: #10B981; }
         .stat-card.warning { border-left-color: #F59E0B; }
         .stat-card.info { border-left-color: #3B82F6; }
-        .stat-card.accent { border-left-color: #EC4899; }
+
+        .stat-icon {
+          font-size: 28px;
+          margin-bottom: 12px;
+          opacity: 0.8;
+        }
 
         .stat-value {
-          font-size: 26px;
+          font-size: 32px;
           font-weight: 800;
           color: #0f172a;
           margin-bottom: 6px;
@@ -939,61 +1081,109 @@ export default function ModernDashboard() {
         .top-users {
           display: flex;
           flex-direction: column;
-          gap: 14px;
+          gap: 12px;
         }
 
         .user-item {
           display: flex;
-          justify-content: space-between;
           align-items: center;
-          padding: 14px;
-          background: #f8fafc;
+          gap: 14px;
+          padding: 16px;
+          background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
           border-radius: 12px;
-          transition: background 0.2s;
+          transition: all 0.2s ease;
+          border: 1px solid #e2e8f0;
         }
 
         .user-item:hover {
-          background: #eef2ff;
+          background: linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%);
+          transform: translateX(4px);
+          box-shadow: 0 4px 12px rgba(99, 102, 241, 0.1);
         }
 
-        .user-info {
+        .user-rank-badge {
           display: flex;
           align-items: center;
-          gap: 10px;
+          justify-content: center;
+          width: 36px;
+          height: 36px;
+          background: linear-gradient(135deg, #8B5CF6, #7c3aed);
+          color: white;
+          font-weight: 700;
+          font-size: 16px;
+          border-radius: 50%;
+          flex-shrink: 0;
+          box-shadow: 0 2px 8px rgba(139, 92, 246, 0.3);
         }
 
-        .user-rank {
-          font-weight: 700;
-          color: #8B5CF6;
-          background: #ede9fe;
-          padding: 2px 8px;
-          border-radius: 6px;
-          font-size: 13px;
+        .user-content {
+          flex: 1;
+          min-width: 0;
+        }
+
+        .user-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 8px;
         }
 
         .user-name {
           color: #1e293b;
           font-weight: 600;
+          font-size: 14px;
         }
 
         .user-count {
-          background: #e0e7ff;
-          color: #4f46e5;
+          background: linear-gradient(135deg, #dbeafe, #bfdbfe);
+          color: #0c4a6e;
           padding: 4px 10px;
           border-radius: 20px;
-          font-size: 13px;
-          font-weight: 600;
+          font-size: 12px;
+          font-weight: 700;
+        }
+
+        .progress-bar {
+          width: 100%;
+          height: 6px;
+          background: #e2e8f0;
+          border-radius: 3px;
+          overflow: hidden;
+        }
+
+        .progress-fill {
+          height: 100%;
+          background: linear-gradient(90deg, #8B5CF6, #7c3aed);
+          border-radius: 3px;
+          transition: width 0.3s ease;
+          box-shadow: 0 0 8px rgba(139, 92, 246, 0.4);
         }
 
         .section {
-          margin-top: 32px;
+          margin-top: 40px;
+        }
+
+        .section-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 20px;
         }
 
         .section-title {
-          font-size: 20px;
+          font-size: 22px;
           font-weight: 700;
           color: #1e293b;
-          margin: 0 0 16px 0;
+          margin: 0;
+        }
+
+        .record-count {
+          font-size: 13px;
+          font-weight: 600;
+          color: #64748b;
+          background: #f1f5f9;
+          padding: 6px 12px;
+          border-radius: 20px;
         }
 
         .history-table-container {
@@ -1017,11 +1207,18 @@ export default function ModernDashboard() {
         }
 
         .history-table th {
-          background: #f8fafc;
+          background: linear-gradient(135deg, #f8fafc, #f1f5f9);
           font-weight: 700;
           color: #334155;
           position: sticky;
           top: 0;
+          font-size: 13px;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+        }
+
+        .history-table tbody tr {
+          transition: all 0.2s ease;
         }
 
         .history-table tbody tr:last-child td {
@@ -1029,7 +1226,54 @@ export default function ModernDashboard() {
         }
 
         .history-table tbody tr:hover {
+          background: linear-gradient(90deg, #f8fafc, #eef2ff);
+          box-shadow: inset 2px 0 0 #8B5CF6;
+        }
+
+        .pagination-container {
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          gap: 16px;
+          margin-top: 20px;
+          padding: 20px;
           background: #f8fafc;
+          border-radius: 12px;
+          border-top: 1px solid #e2e8f0;
+        }
+
+        .pagination-btn {
+          padding: 10px 20px;
+          background: white;
+          border: 2px solid #e2e8f0;
+          border-radius: 8px;
+          font-weight: 600;
+          color: #1e293b;
+          cursor: pointer;
+          transition: all 0.2s ease;
+          font-size: 14px;
+        }
+
+        .pagination-btn:hover:not(:disabled) {
+          border-color: #1976d2;
+          background: linear-gradient(135deg, #dbeafe, #bfdbfe);
+          color: #0c4a6e;
+          transform: translateY(-2px);
+          box-shadow: 0 4px 12px rgba(25, 118, 210, 0.2);
+        }
+
+        .pagination-btn:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+          background: #f1f5f9;
+        }
+
+        .pagination-info {
+          font-weight: 600;
+          color: #1e293b;
+          font-size: 14px;
+          min-width: 120px;
+          text-align: center;
         }
 
         .area-badge {
@@ -1038,16 +1282,19 @@ export default function ModernDashboard() {
           font-size: 12px;
           font-weight: 600;
           display: inline-block;
+          transition: all 0.2s ease;
         }
 
         .area-badge.pre-assy {
-          background: #fee2e2;
-          color: #b91c1c;
+          background: linear-gradient(135deg, #fee2e2, #fecaca);
+          color: #991b1b;
+          border: 1px solid #fca5a5;
         }
 
         .area-badge.final-assy {
-          background: #dbeafe;
-          color: #1e40af;
+          background: linear-gradient(135deg, #dbeafe, #bfdbfe);
+          color: #0c4a6e;
+          border: 1px solid #93c5fd;
         }
 
         .status-badge {
@@ -1055,44 +1302,239 @@ export default function ModernDashboard() {
           border-radius: 20px;
           font-size: 12px;
           font-weight: 600;
+          display: inline-block;
+          transition: all 0.2s ease;
         }
 
         .status-badge.ok {
-          background: #dcfce7;
-          color: #166534;
+          background: linear-gradient(135deg, #dcfce7, #c6f6d5);
+          color: #15803d;
+          border: 1px solid #86efac;
         }
 
         .status-badge.ng {
-          background: #fef3c7;
-          color: #92400e;
+          background: linear-gradient(135deg, #fef3c7, #fde68a);
+          color: #854d0e;
+          border: 1px solid #fcd34d;
         }
 
         .empty-activity {
-          padding: 24px;
+          padding: 40px 24px;
           text-align: center;
           color: #94a3b8;
           font-style: italic;
-          background: white;
+          background: linear-gradient(135deg, #f8fafc, #f1f5f9);
           border-radius: 16px;
-          margin-top: 16px;
+          margin-top: 20px;
+          border: 2px dashed #cbd5e1;
+          font-size: 15px;
+        }
+
+        /* RESPONSIVE DESIGN */
+        @media (max-width: 1024px) {
+          .main-content {
+            padding: 24px;
+            max-width: 100%;
+          }
+
+          .header-section {
+            padding: 24px;
+          }
+
+          .header-content {
+            flex-direction: column;
+            gap: 16px;
+          }
+
+          .filter-container {
+            width: 100%;
+            min-width: auto;
+          }
+
+          .category-dropdown {
+            flex: 1;
+          }
+
+          .stats-grid {
+            grid-template-columns: repeat(2, 1fr);
+          }
+
+          .charts-section {
+            grid-template-columns: 1fr;
+          }
         }
 
         @media (max-width: 768px) {
-          .dashboard-container {
-            flex-direction: column;
-          }
           .main-content {
             padding: 16px;
           }
-          .header {
-            flex-direction: column;
-            align-items: stretch;
+
+          .header-section {
+            padding: 20px;
+            border-radius: 12px;
           }
+
+          .page-title {
+            font-size: 24px;
+          }
+
+          .page-subtitle {
+            font-size: 14px;
+          }
+
           .filter-container {
+            flex-direction: column;
+            gap: 10px;
+            width: 100%;
+            padding: 12px 16px;
+          }
+
+          .filter-label {
             width: 100%;
           }
+
           .category-dropdown {
             width: 100%;
+          }
+
+          .month-navigation {
+            flex-wrap: wrap;
+            gap: 12px;
+            padding: 16px;
+          }
+
+          .month-btn {
+            padding: 10px 16px;
+            font-size: 13px;
+          }
+
+          .month-display {
+            width: 100%;
+            order: 3;
+            font-size: 16px;
+          }
+
+          .stats-grid {
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+          }
+
+          .stat-card {
+            padding: 16px 12px;
+          }
+
+          .stat-value {
+            font-size: 24px;
+          }
+
+          .stat-label {
+            font-size: 12px;
+          }
+
+          .chart-container {
+            height: 220px;
+          }
+
+          .chart-container.large {
+            height: 260px;
+          }
+
+          .chart-container.small {
+            height: 180px;
+          }
+
+          .section-header {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 8px;
+          }
+
+          .history-table-container {
+            border-radius: 12px;
+            font-size: 12px;
+          }
+
+          .history-table th,
+          .history-table td {
+            padding: 12px 10px;
+          }
+
+          .pagination-container {
+            flex-wrap: wrap;
+            gap: 12px;
+            padding: 16px;
+          }
+
+          .pagination-btn {
+            padding: 8px 16px;
+            font-size: 13px;
+          }
+
+          .pagination-info {
+            width: 100%;
+          }
+
+          .user-item {
+            padding: 12px;
+            gap: 10px;
+          }
+
+          .user-rank-badge {
+            width: 32px;
+            height: 32px;
+            font-size: 14px;
+          }
+
+          .user-count {
+            font-size: 11px;
+          }
+        }
+
+        @media (max-width: 480px) {
+          .main-content {
+            padding: 12px;
+          }
+
+          .header-section {
+            padding: 16px;
+            border-radius: 10px;
+          }
+
+          .page-title {
+            font-size: 20px;
+          }
+
+          .page-subtitle {
+            font-size: 13px;
+          }
+
+          .stats-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .stat-card {
+            padding: 14px 12px;
+          }
+
+          .stat-value {
+            font-size: 20px;
+          }
+
+          .chart-box {
+            padding: 16px;
+          }
+
+          .chart-title {
+            font-size: 14px;
+          }
+
+          .history-table {
+            font-size: 11px;
+          }
+
+          .history-table th,
+          .history-table td {
+            padding: 8px 6px;
           }
         }
       `}</style>

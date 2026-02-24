@@ -1,4 +1,4 @@
-// app/signup-page.tsx
+// app/signup-page/page.tsx
 "use client"
 
 import type React from "react"
@@ -17,7 +17,7 @@ export default function SignupPage() {
     password: "",
     confirmPassword: "",
     department: "",
-    role: "" as "group-leader-qa" | "inspector-qa" | "inspector-ga",
+    role: "" as "inspector-qa" | "group-leader-qa" | "admin" | "eso",
   })
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
@@ -26,10 +26,10 @@ export default function SignupPage() {
 
   // 🔹 Auto-set department berdasarkan role (dengan nilai yang sesuai auth context)
   useEffect(() => {
-    if (formData.role === "inspector-ga") {
-      setFormData(prev => ({ ...prev, department: "general-affairs" })) // ✅ "ga" bukan "general-affairs"
-    } else if (formData.role === "group-leader-qa" || formData.role === "inspector-qa") {
-      setFormData(prev => ({ ...prev, department: "quality-assurance" })) // ✅ "qa" bukan "quality-assurance"
+    if (formData.role === "group-leader-qa") {
+      setFormData(prev => ({ ...prev, department: "quality-assurance" }))
+    } else if (formData.role === "inspector-qa") {
+      setFormData(prev => ({ ...prev, department: "quality-assurance" }))
     }
   }, [formData.role])
 
@@ -47,7 +47,7 @@ const handleSubmit = async (e: React.FormEvent) => {
   setLoading(true)
 
   // Validasi role
-  if (!formData.role || !['group-leader-qa', 'inspector-qa', 'inspector-ga'].includes(formData.role)) {
+  if (!formData.role || !['inspector-qa', 'group-leader-qa', 'admin', 'eso'].includes(formData.role)) {
     setError("Pilih role terlebih dahulu!")
     setLoading(false)
     return
@@ -159,10 +159,9 @@ const handleSubmit = async (e: React.FormEvent) => {
                       required
                     >
                       <option value="">Pilih Departemen</option>
-                      <option value="general-affairs">General Affairs (GA)</option>
                       <option value="quality-assurance">Quality Assurance (QA)</option>
                     </select>
-                  </div>
+                  </div> 
                 </div>
 
                 <div className="input-wrapper">
@@ -179,7 +178,6 @@ const handleSubmit = async (e: React.FormEvent) => {
                       <option value="">Pilih Peran</option>
                       <option value="group-leader-qa">Group Leader QA</option>
                       <option value="inspector-qa">Inspector QA</option>
-                      <option value="inspector-ga">Inspector GA</option>
                     </select>
                   </div>
                 </div>

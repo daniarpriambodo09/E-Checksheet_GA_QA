@@ -1,0 +1,1884 @@
+// File: app/api/areas/get-by-category/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import pool from '@/lib/db';
+
+export async function GET(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const categoryCode = searchParams.get('categoryCode');
+    
+    if (!categoryCode) {
+      return NextResponse.json({ error: 'Missing categoryCode parameter' }, { status: 400 });
+    }
+    
+    const result = await pool.query(
+      `SELECT id, area_name, area_code, description, sort_order
+       FROM checklist_areas
+       WHERE category_id = (SELECT id FROM checklist_categories WHERE category_code = $1)
+       AND is_active = TRUE
+       ORDER BY sort_order, area_name`,
+      [categoryCode]
+    );
+    
+    return NextResponse.json({
+      success: true,
+      areas: result.rows
+    });
+  } catch (error) {
+    console.error('❌ Error fetching areas:', error);
+    return NextResponse.json({ error: 'Server error' }, { status: 500 });
+  }
+}
+
+// app/api/auth/login/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import pool from '@/lib/db';
+import bcrypt from 'bcryptjs';
+
+export async function POST(request: NextRequest) {
+  try {
+    const { username, password } = await request.json();
+
+    // Validasi input
+    if (!username || !password) {
+      return NextResponse.json(
+        { error: 'Username dan password harus diisi!' },
+        { status: 400 }
+      );
+    }
+
+    console.log('🔐 Login attempt for username:', username.trim());
+
+    // ✅ PostgreSQL: Gunakan $1, $2 dan pool.query().rows
+    const result = await pool.query(
+      `SELECT id, username, full_name, nik, department, role, password_hash, is_active 
+       FROM users 
+       WHERE username = $1`,
+      [username.trim()]
+    );
+
+    if (result.rows.length === 0) {
+      console.log('❌ Username not found:', username.trim());
+      return NextResponse.json(
+        { error: 'Username tidak ditemukan!' },
+        { status: 401 }
+      );
+    }
+
+    const user = result.rows[0];
+    console.log('✅ User found:', user.username, 'Role:', user.role);
+
+    // Cek status akun
+    if (!user.is_active) {
+      console.log('⚠️ Account inactive:', user.username);
+      return NextResponse.json(
+        { error: 'Akun tidak aktif. Hubungi administrator.' },
+        { status: 403 }
+      );
+    }
+
+    // Verifikasi password
+    const isPasswordValid = await bcrypt.compare(password, user.password_hash);
+    
+    if (!isPasswordValid) {
+      console.log('❌ Invalid password for user:', user.username);
+      return NextResponse.json(
+        { error: 'Password salah!' },
+        { status: 401 }
+      );
+    }
+
+    console.log('✅ Login successful:', user.username);
+
+    // Return user data (tanpa password hash)
+    return NextResponse.json(
+      {
+        success: true,
+        user: {
+          id: user.id,
+          username: user.username,
+          fullName: user.full_name,
+          nik: user.nik,
+          department: user.department,
+          role: user.role,
+        },
+      },
+      { status: 200 }
+    );
+  } catch (error) {
+    console.error('❌ Login error:', error);
+    return NextResponse.json(
+      { error: 'Terjadi kesalahan server. Silakan coba lagi.' },
+      { status: 500 }
+    );
+  }
+}
+
+// app/api/auth/signup/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import pool from '@/lib/db';
+import bcrypt from 'bcryptjs';
+
+export async function POST(request: NextRequest) {
+  try {
+    const { username, fullName, nik, department, role, password, confirmPassword } = await request.json();
+
+    console.log('📝 Signup attempt:', { username, role, department });
+
+    // Validasi required fields
+    if (!username || !fullName || !nik || !department || !role || !password || !confirmPassword) {
+      return NextResponse.json(
+        { error: 'Semua field wajib diisi!' },
+        { status: 400 }
+      );
+    }
+
+    // Validasi role
+    const validRoles = ['group-leader-qa', 'inspector-qa', 'inspector-ga', 'admin', 'eso'];
+    if (!validRoles.includes(role)) {
+      return NextResponse.json(
+        { error: 'Role tidak valid!' },
+        { status: 400 }
+      );
+    }
+
+    // Validasi password
+    if (password.length < 6) {
+      return NextResponse.json(
+        { error: 'Password minimal 6 karakter!' },
+        { status: 400 }
+      );
+    }
+
+    if (password !== confirmPassword) {
+      return NextResponse.json(
+        { error: 'Password dan konfirmasi tidak cocok!' },
+        { status: 400 }
+      );
+    }
+
+    // Validasi role ↔ departemen
+    const validDepartments: Record<string, string[]> = {
+      'group-leader-qa': ['quality-assurance'],
+      'inspector-qa': ['quality-assurance'],
+      'inspector-ga': ['general-affairs'],
+      'admin': ['admin'],
+      'eso': ['k3'],
+    };
+
+    if (!validDepartments[role] || !validDepartments[role].includes(department)) {
+      const deptLabels = (validDepartments[role] || [])
+        .map(d => {
+          const map: Record<string, string> = {
+            'quality-assurance': 'Quality Assurance',
+            'general-affairs': 'General Affairs',
+            'admin': 'Admin',
+            'k3': 'K3/ESO',
+          };
+          return map[d] || d;
+        })
+        .join(', ');
+      
+      return NextResponse.json(
+        { error: `Role ${role} hanya boleh memilih departemen: ${deptLabels}` },
+        { status: 400 }
+      );
+    }
+
+    // ✅ PostgreSQL: Cek duplikat username atau NIK
+    const duplicateCheck = await pool.query(
+      `SELECT id FROM users WHERE username = $1 OR nik = $2`,
+      [username.trim(), nik.trim()]
+    );
+
+    if (duplicateCheck.rows.length > 0) {
+      console.log('⚠️ Duplicate user detected:', username.trim());
+      return NextResponse.json(
+        { error: 'Username atau NIK sudah terdaftar!' },
+        { status: 409 }
+      );
+    }
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Generate ID unik
+    const userId = `user_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
+    console.log('💾 Creating new user:', userId);
+
+    // ✅ PostgreSQL: Simpan ke database dengan RETURNING
+    const insertResult = await pool.query(
+      `INSERT INTO users 
+       (id, username, full_name, nik, department, role, password_hash, is_active, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE, CURRENT_TIMESTAMP)
+       RETURNING id, username, role`,
+      [
+        userId,
+        username.trim(),
+        fullName.trim(),
+        nik.trim(),
+        department,
+        role,
+        hashedPassword
+      ]
+    );
+
+    const newUser = insertResult.rows[0];
+    console.log('✅ User created successfully:', newUser);
+    
+    return NextResponse.json(
+      { 
+        success: true, 
+        message: 'Pendaftaran berhasil! Silakan login.',
+        userId: newUser.id
+      },
+      { status: 201 }
+    );
+  } catch (error) {
+    console.error('❌ Signup error:', error);
+    
+    // Handle PostgreSQL specific errors
+    if (error instanceof Error) {
+      // Unique constraint violation
+      if (error.message.includes('unique') || error.message.includes('duplicate')) {
+        return NextResponse.json(
+          { error: 'Username atau NIK sudah terdaftar!' },
+          { status: 409 }
+        );
+      }
+    }
+    
+    return NextResponse.json(
+      { error: 'Terjadi kesalahan saat pendaftaran. Silakan coba lagi.' },
+      { status: 500 }
+    );
+  }
+}
+
+// app/api/dashboard/get-categories/route.ts
+import { NextResponse } from 'next/server';
+import pool from '@/lib/db';
+
+export async function GET() {
+  try {
+    // ✅ GUNAKAN pool.query() bukan pool.execute()
+    const categoriesResult = await pool.query(`
+      SELECT 
+        category_name, 
+        category_code, 
+        table_type, 
+        area_type 
+      FROM checklist_categories 
+      WHERE is_active = TRUE 
+      ORDER BY sort_order, category_name
+    `);
+
+    // Format untuk dropdown
+    const categoryList = categoriesResult.rows.map((cat: any) => ({
+      label: cat.category_name,
+      value: cat.category_code,
+      type: cat.table_type,
+      area: cat.area_type
+    }));
+
+    return NextResponse.json({
+      success: true,
+      categories: [
+        { label: 'All Category', value: 'All Category', type: 'all', area: 'all' },
+        ...categoryList
+      ]
+    });
+  } catch (error) {
+    console.error('❌ Get categories error:', error);
+    return NextResponse.json({ error: 'Server error' }, { status: 500 });
+  }
+}
+
+// app/api/dashboard/get-data/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import pool from '@/lib/db';
+
+export async function GET(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const categoryCode = searchParams.get('categoryCode'); // optional
+    const month = searchParams.get('month'); // format: YYYY-MM
+    const days = searchParams.get('days') || '7'; // default 7 days for trend
+
+    if (!month) {
+      return NextResponse.json({ error: 'Missing month parameter' }, { status: 400 });
+    }
+
+    // Build query based on category filter
+    let categoryCondition = '';
+    let categoryParams: any[] = [];
+
+    if (categoryCode && categoryCode !== 'All Category') {
+      categoryCondition = 'AND c.category_code = $2';
+      categoryParams = [categoryCode];
+    }
+
+    // ============================================
+    // 1. GET TOTAL CHECKLIST COUNT (per date + category)
+    // ============================================
+    // Hitung jumlah date_key unik per kategori (bukan per item)
+    const totalQuery = `
+      SELECT 
+        COUNT(DISTINCT CONCAT(r.date_key, '-', c.id)) as table_count
+      FROM checklist_results r
+      INNER JOIN checklist_categories c ON r.category_id = c.id
+      WHERE r.date_key LIKE $1 
+        ${categoryCondition}
+        AND r.status IN ('OK', 'NG')
+    `;
+
+    const totalParams = [`${month}%`, ...categoryParams];
+    const totalResult = await pool.query(totalQuery, totalParams);
+    const totalChecklist = totalResult.rows[0]?.table_count || 0;
+
+    // ============================================
+    // 2. GET COMPLETED CHECKLIST (SEMUA status OK, tidak ada NG)
+    // ============================================
+    // ✅ FIX: Hitung date_key di mana SEMUA item statusnya OK (tidak ada satupun NG)
+    const completedQuery = `
+      SELECT 
+        COUNT(*) as completed_count
+      FROM (
+        SELECT r.date_key, c.id as category_id
+        FROM checklist_results r
+        INNER JOIN checklist_categories c ON r.category_id = c.id
+        WHERE r.date_key LIKE $1
+          ${categoryCondition}
+          AND r.status IN ('OK', 'NG')  -- Hanya hitung yang sudah diisi
+        GROUP BY r.date_key, c.id
+        -- ✅ TIDAK ADA satupun NG pada date_key ini
+        HAVING COUNT(CASE WHEN r.status = 'NG' THEN 1 END) = 0
+          -- ✅ Minimal ada 1 OK (agar tidak hitung data kosong)
+          AND COUNT(CASE WHEN r.status = 'OK' THEN 1 END) > 0
+      ) as completed_tables
+    `;
+
+    const completedResult = await pool.query(completedQuery, totalParams);
+    const completedChecklist = completedResult.rows[0]?.completed_count || 0;
+
+    // ============================================
+    // 3. GET TOTAL NG COUNT
+    // ============================================
+    // Hitung total item berstatus NG
+    const ngQuery = `
+      SELECT 
+        COUNT(*) as total_ng
+      FROM checklist_results r
+      INNER JOIN checklist_categories c ON r.category_id = c.id
+      WHERE r.date_key LIKE $1
+        ${categoryCondition}
+        AND r.status = 'NG'
+    `;
+
+    const ngResult = await pool.query(ngQuery, totalParams);
+    const totalNG = ngResult.rows[0]?.total_ng || 0;
+
+    // ============================================
+    // 4. GET TREND DATA (last 7 days)
+    // ============================================
+    const trendDays = parseInt(days);
+    const today = new Date();
+    const startDate = new Date(today);
+    startDate.setDate(today.getDate() - trendDays + 1);
+    const startDateStr = startDate.toISOString().split('T')[0];
+
+    // Hitung jumlah checklist per hari (per date_key per category)
+    const trendQuery = `
+      SELECT 
+        r.date_key,
+        COUNT(DISTINCT CONCAT(r.date_key, '-', c.id)) as daily_count
+      FROM checklist_results r
+      INNER JOIN checklist_categories c ON r.category_id = c.id
+      WHERE r.date_key >= $1
+        ${categoryCondition}
+        AND r.status IN ('OK', 'NG')
+      GROUP BY r.date_key
+      ORDER BY r.date_key ASC
+    `;
+
+    const trendParams = [startDateStr, ...categoryParams];
+    const trendResult = await pool.query(trendQuery, trendParams);
+    const trendData = trendResult.rows.map(row => ({
+      date: row.date_key,
+      count: parseInt(row.daily_count)
+    }));
+
+    // ============================================
+    // 5. GET DISTRIBUTION (OK vs NG)
+    // ============================================
+    const distributionQuery = `
+      SELECT 
+        r.status,
+        COUNT(*) as count,
+        c.category_code,
+        c.category_name
+      FROM checklist_results r
+      INNER JOIN checklist_categories c ON r.category_id = c.id
+      WHERE r.date_key >= $1
+        ${categoryCondition}
+        AND r.status IN ('OK', 'NG')
+      GROUP BY r.status, c.id, c.category_code, c.category_name
+      ORDER BY c.category_name, r.status
+    `;
+
+    const distributionResult = await pool.query(distributionQuery, trendParams);
+    const distributionData = distributionResult.rows.map(row => ({
+      status: row.status,
+      count: parseInt(row.count),
+      category: row.category_name || row.category_code
+    }));
+
+    // ============================================
+    // 6. GET TOP USERS
+    // ============================================
+    const topUsersQuery = `
+      SELECT 
+        u.full_name as user_name,
+        COUNT(DISTINCT CONCAT(r.date_key, '-', r.category_id)) as submission_count
+      FROM checklist_results r
+      INNER JOIN users u ON r.user_id = u.id
+      INNER JOIN checklist_categories c ON r.category_id = c.id
+      WHERE r.date_key >= $1
+        ${categoryCondition}
+      GROUP BY u.id, u.full_name
+      ORDER BY submission_count DESC
+      LIMIT 5
+    `;
+
+    const topUsersResult = await pool.query(topUsersQuery, trendParams);
+    const topUsers = topUsersResult.rows.map(row => ({
+      name: row.user_name,
+      count: parseInt(row.submission_count)
+    }));
+
+    // ============================================
+    // 7. GET HISTORY DATA
+    // ============================================
+    const historyQuery = `
+      SELECT 
+        r.date_key,
+        r.submitted_at,
+        c.category_name,
+        c.area_type,
+        r.shift,
+        r.status,
+        COUNT(CASE WHEN r.status = 'NG' THEN 1 END) OVER (PARTITION BY r.date_key, r.category_id) as ng_count,
+        u.full_name as submitted_by
+      FROM checklist_results r
+      INNER JOIN checklist_categories c ON r.category_id = c.id
+      INNER JOIN users u ON r.user_id = u.id
+      WHERE r.date_key LIKE $1
+        ${categoryCondition}
+      ORDER BY r.submitted_at DESC
+      LIMIT 50
+    `;
+
+    const historyResult = await pool.query(historyQuery, totalParams);
+    const historyData = historyResult.rows.map(row => ({
+      filledAt: row.submitted_at,
+      area: row.area_type === 'pre-assy' ? 'Pre Assy' : 'Final Assy',
+      category: row.category_name,
+      shift: row.shift,
+      status: row.status,
+      ngCount: row.ng_count || 0,
+      filledBy: row.submitted_by
+    }));
+
+    // ============================================
+    // 8. CALCULATE COMPLETION RATE
+    // ============================================
+    // Jika All Category → pembagi = total semua tabel aktif
+    // Jika kategori tertentu → pembagi = 1 per date_key
+    let totalActiveTables = 1; // Default untuk 1 kategori
+    
+    if (categoryCode === 'All Category' || !categoryCode) {
+      // Hitung jumlah kategori aktif
+      const activeCategoriesQuery = `
+        SELECT COUNT(*) as count
+        FROM checklist_categories
+        WHERE is_active = TRUE
+      `;
+      const activeCategoriesResult = await pool.query(activeCategoriesQuery);
+      totalActiveTables = parseInt(activeCategoriesResult.rows[0]?.count || '1');
+    }
+
+    // Rumus: (Completed / Total Active Tables) × 100%
+    const completionRate = totalActiveTables > 0 
+      ? ((completedChecklist / totalActiveTables) * 100).toFixed(1)
+      : '0.0';
+
+    return NextResponse.json({
+      success: true,
+      stats: {
+        total: totalChecklist,
+        completed: completedChecklist,
+        pending: totalNG,
+        completionRate
+      },
+      trendData,
+      distributionData,
+      topUsers,
+      historyData
+    });
+  } catch (error) {
+    console.error('❌ Dashboard API error:', error);
+    return NextResponse.json({ error: 'Server error' }, { status: 500 });
+  }
+}
+
+// app/api/final-assy/get-checklist-items/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { executeQuery } from '@/lib/db-helpers';
+
+interface ChecklistItem {
+  id: number;
+  no: string;
+  item_check: string;
+  check_point: string;
+  metode_check: string;
+  area: string;
+  shift: string;
+  show_in_wp_check: boolean;
+  show_in_checker: boolean;
+  show_in_visual_1: boolean;
+  show_in_visual_2: boolean;
+  show_in_double_check: boolean;
+}
+
+export async function GET(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const type = searchParams.get('type'); // "inspector" atau "group-leader"
+
+    if (!type) {
+      return NextResponse.json({ error: 'Missing type parameter' }, { status: 400 });
+    }
+
+    // Cari category_id berdasarkan type
+    let categoryId: number;
+    
+    if (type === 'inspector') {
+      const categories = await executeQuery<{ id: number }>(
+        'SELECT id FROM checklist_categories WHERE category_code = $1',
+        ['final-assy-inspector']
+      );
+      
+      if (categories.length === 0) {
+        return NextResponse.json({ error: 'Category not found' }, { status: 404 });
+      }
+      categoryId = categories[0].id;
+    } else {
+      return NextResponse.json({ error: 'Invalid type' }, { status: 400 });
+    }
+
+    // Ambil data dari database
+    const items = await executeQuery<ChecklistItem>(
+      `SELECT 
+         id, 
+         item_no as no, 
+         item_check, 
+         check_point, 
+         metode_check, 
+         area,
+         shift,
+         show_in_wp_check,
+         show_in_checker,
+         show_in_visual_1,
+         show_in_visual_2,
+         show_in_double_check
+       FROM checklist_items 
+       WHERE category_id = $1 AND is_active = TRUE
+       ORDER BY sort_order`,
+      [categoryId]
+    );
+
+    // Transformasi: Kelompokkan berdasarkan (no, item_check, check_point, metode_check)
+    const groupedItems: Record<string, any> = {};
+    
+    items.forEach((row) => {
+      // Key unik berdasarkan kombinasi item
+      const key = `${row.no}-${row.item_check}-${row.check_point}-${row.metode_check}`;
+      
+      if (!groupedItems[key]) {
+        groupedItems[key] = {
+          id: row.id,
+          no: row.no,
+          itemCheck: row.item_check,
+          checkPoint: row.check_point,
+          metodeCheck: row.metode_check,
+          area: row.area,
+          shifts: [],
+          showIn: {
+            wpCheck: row.show_in_wp_check,
+            checker: row.show_in_checker,
+            visual1: row.show_in_visual_1,
+            visual2: row.show_in_visual_2,
+            doubleCheck: row.show_in_double_check
+          }
+        };
+      }
+      
+      // Tambahkan shift (A/B) ke dalam array
+      if (!groupedItems[key].shifts.some((s: any) => s.shift === row.shift)) {
+        groupedItems[key].shifts.push({ shift: row.shift });
+      }
+    });
+
+    return NextResponse.json({ 
+      success: true, 
+      data: Object.values(groupedItems) 
+    });
+  } catch (error) {
+    console.error('❌ Error:', error);
+    return NextResponse.json({ 
+      error: 'Server error',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    }, { status: 500 });
+  }
+}
+
+// app/api/final-assy/get-results/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import pool from '@/lib/db';
+
+export async function GET(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const userId = searchParams.get('userId');
+    const categoryCode = searchParams.get('categoryCode');
+    const month = searchParams.get('month');
+    const role = searchParams.get('role');
+    const areaCode = searchParams.get('areaCode'); // ✅ Ambil areaCode
+
+    if (!userId || !categoryCode || !month) {
+      return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
+    }
+
+    // Validasi user
+    const users = await pool.query(
+      'SELECT id, username, full_name, nik, department, role FROM users WHERE id = $1 AND is_active = TRUE',
+      [userId]
+    );
+    if (users.rows.length === 0) {
+      return NextResponse.json({ error: 'Invalid user' }, { status: 403 });
+    }
+
+    // Ambil category_id
+    const categories = await pool.query(
+      'SELECT id FROM checklist_categories WHERE category_code = $1',
+      [categoryCode]
+    );
+    if (categories.rows.length === 0) {
+      return NextResponse.json({ error: 'Category not found' }, { status: 404 });
+    }
+    const categoryId = categories.rows[0].id;
+
+    // ✅ BUILD QUERY DENGAN FILTER AREA
+    let query = '';
+    let queryParams: any[] = [];
+    let areaId: number | null = null;
+
+    // Resolve area_id dari areaCode
+    if (areaCode) {
+      const areaResult = await pool.query(
+        `SELECT id FROM checklist_areas 
+         WHERE area_code = $1 AND category_id = $2 AND is_active = TRUE`,
+        [areaCode, categoryId]
+      );
+      if (areaResult.rows.length > 0) {
+        areaId = areaResult.rows[0].id;
+      }
+    }
+
+    // Tentukan query berdasarkan role dan area
+    if (categoryCode === 'final-assy-inspector') {
+      if (role === 'group-leader-qa') {
+        // Group-leader: lihat SEMUA data inspector
+        if (areaId) {
+          query = `
+            SELECT r.date_key, r.item_id, r.shift, r.status, r.ng_description, 
+                   r.ng_department, r.submitted_at, r.user_id, r.nik, u.full_name, r.area_id
+            FROM checklist_results r
+            LEFT JOIN users u ON r.user_id = u.id
+            WHERE r.category_id = $1 
+              AND r.date_key LIKE $2
+              AND COALESCE(r.area_id, -1) = $3  -- ✅ Filter by area_id
+            ORDER BY r.date_key, r.item_id, r.shift
+          `;
+          queryParams = [categoryId, `${month}%`, areaId];
+        } else {
+          query = `
+            SELECT r.date_key, r.item_id, r.shift, r.status, r.ng_description, 
+                   r.ng_department, r.submitted_at, r.user_id, r.nik, u.full_name, r.area_id
+            FROM checklist_results r
+            LEFT JOIN users u ON r.user_id = u.id
+            WHERE r.category_id = $1 
+              AND r.date_key LIKE $2
+            ORDER BY r.date_key, r.item_id, r.shift
+          `;
+          queryParams = [categoryId, `${month}%`];
+        }
+      } else {
+        // Inspector: hanya data sendiri
+        if (areaId) {
+          query = `
+            SELECT r.date_key, r.item_id, r.shift, r.status, r.ng_description, 
+                   r.ng_department, r.submitted_at, r.user_id, r.nik, u.full_name, r.area_id
+            FROM checklist_results r
+            LEFT JOIN users u ON r.user_id = u.id
+            WHERE r.user_id = $1 
+              AND r.category_id = $2 
+              AND r.date_key LIKE $3
+              AND COALESCE(r.area_id, -1) = $4  -- ✅ Filter by area_id
+            ORDER BY r.date_key, r.item_id, r.shift
+          `;
+          queryParams = [userId, categoryId, `${month}%`, areaId];
+        } else {
+          query = `
+            SELECT r.date_key, r.item_id, r.shift, r.status, r.ng_description, 
+                   r.ng_department, r.submitted_at, r.user_id, r.nik, u.full_name, r.area_id
+            FROM checklist_results r
+            LEFT JOIN users u ON r.user_id = u.id
+            WHERE r.user_id = $1 
+              AND r.category_id = $2 
+              AND r.date_key LIKE $3
+            ORDER BY r.date_key, r.item_id, r.shift
+          `;
+          queryParams = [userId, categoryId, `${month}%`];
+        }
+      }
+    } else {
+      // Group Leader table
+      if (areaId) {
+        query = `
+          SELECT r.date_key, r.item_id, r.shift, r.status, r.ng_description, 
+                 r.ng_department, r.submitted_at, r.user_id, r.nik, u.full_name, r.area_id
+          FROM checklist_results r
+          LEFT JOIN users u ON r.user_id = u.id
+          WHERE r.user_id = $1 
+            AND r.category_id = $2 
+            AND r.date_key LIKE $3
+            AND COALESCE(r.area_id, -1) = $4  -- ✅ Filter by area_id
+          ORDER BY r.date_key, r.item_id, r.shift
+        `;
+        queryParams = [userId, categoryId, `${month}%`, areaId];
+      } else {
+        query = `
+          SELECT r.date_key, r.item_id, r.shift, r.status, r.ng_description, 
+                 r.ng_department, r.submitted_at, r.user_id, r.nik, u.full_name, r.area_id
+          FROM checklist_results r
+          LEFT JOIN users u ON r.user_id = u.id
+          WHERE r.user_id = $1 
+            AND r.category_id = $2 
+            AND r.date_key LIKE $3
+          ORDER BY r.date_key, r.item_id, r.shift
+        `;
+        queryParams = [userId, categoryId, `${month}%`];
+      }
+    }
+
+    // Eksekusi query
+    const results = await pool.query(query, queryParams);
+
+    // Format response
+    const formatted: Record<string, Record<string, any>> = {};
+    results.rows.forEach((row: any) => {
+      if (!formatted[row.date_key]) formatted[row.date_key] = {};
+      formatted[row.date_key][`${row.item_id}-${row.shift}`] = {
+        status: row.status,
+        ngCount: row.status === 'NG' ? 1 : 0,
+        items: [],
+        notes: '',
+        submittedAt: row.submitted_at,
+        submittedBy: row.full_name || row.user_id || 'System',
+        ngDescription: row.ng_description || '',
+        ngDepartment: row.ng_department || 'QA',
+        areaId: row.area_id  // ✅ Include areaId di response
+      };
+    });
+
+    return NextResponse.json({
+      success: true,
+      formatted,
+      count: results.rows.length,
+      role,
+      categoryCode,
+      areaId
+    });
+
+  } catch (error) {
+    console.error('❌ Get results error:', error);
+    return NextResponse.json({ error: 'Server error' }, { status: 500 });
+  }
+}
+
+// app/api/final-assy/get-signatures/route.ts
+// ✅ FIXED: Parameter indexing manual yang konsisten dengan query
+
+import { NextRequest, NextResponse } from 'next/server';
+import pool from '@/lib/db';
+
+interface User {
+  id: string;
+  username: string;
+  full_name: string;
+  nik: string;
+  department: string;
+  role: string;
+}
+
+interface Category {
+  id: number;
+}
+
+interface Signature {
+  date_key: string;
+  shift: string;
+  signature_status: string;
+}
+
+export async function GET(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const userId = searchParams.get('userId');
+    const categoryCode = searchParams.get('categoryCode');
+    const month = searchParams.get('month');
+    const role = searchParams.get('role');
+    const areaCode = searchParams.get('areaCode');
+
+    if (!userId || !categoryCode || !month) {
+      return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
+    }
+
+    // Validasi userId
+    const users = await pool.query<User>(
+      'SELECT id, username, full_name, nik, department, role FROM users WHERE id = $1 AND is_active = TRUE',
+      [userId]
+    );
+    if (users.rows.length === 0) {
+      return NextResponse.json({ error: 'Invalid user' }, { status: 403 });
+    }
+
+    // Ambil category_id
+    const categories = await pool.query<Category>(
+      'SELECT id FROM checklist_categories WHERE category_code = $1',
+      [categoryCode]
+    );
+    if (categories.rows.length === 0) {
+      return NextResponse.json({ error: 'Category not found' }, { status: 404 });
+    }
+    const categoryId = categories.rows[0].id;
+
+    // =========================================================
+    // 🔹 BUILD QUERY DENGAN PARAMETER INDEX MANUAL
+    // =========================================================
+    
+    let query = '';
+    let queryParams: any[] = [];
+
+    if (categoryCode === 'final-assy-inspector') {
+      // === TABEL INSPECTOR ===
+      if (role === 'group-leader-qa') {
+        // Group-leader: lihat SEMUA signature inspector
+        if (areaCode) {
+          // ✅ Query dengan 4 parameter untuk filter area via EXISTS
+          query = `
+            SELECT s.date_key, s.shift, s.signature_status
+            FROM checklist_signatures s
+            WHERE s.category_id = $1 
+              AND s.date_key LIKE $2
+              AND EXISTS (
+                SELECT 1 FROM checklist_results cr
+                INNER JOIN checklist_items ci ON cr.item_id = ci.id
+                WHERE cr.user_id = s.user_id
+                  AND cr.category_id = s.category_id
+                  AND cr.date_key = s.date_key
+                  AND cr.shift = s.shift
+                  AND ci.area_id = (
+                    SELECT id FROM checklist_areas 
+                    WHERE area_code = $3::varchar AND category_id = $4::integer
+                  )
+              )
+            ORDER BY s.date_key, s.shift
+          `;
+          queryParams = [categoryId, `${month}%`, areaCode, categoryId];
+        } else {
+          // ✅ Query dengan 2 parameter
+          query = `
+            SELECT s.date_key, s.shift, s.signature_status
+            FROM checklist_signatures s
+            WHERE s.category_id = $1 
+              AND s.date_key LIKE $2
+            ORDER BY s.date_key, s.shift
+          `;
+          queryParams = [categoryId, `${month}%`];
+        }
+      } else {
+        // Inspector: hanya signature sendiri
+        if (areaCode) {
+          // ✅ Query dengan 5 parameter
+          query = `
+            SELECT s.date_key, s.shift, s.signature_status
+            FROM checklist_signatures s
+            WHERE s.user_id = $1 
+              AND s.category_id = $2 
+              AND s.date_key LIKE $3
+              AND EXISTS (
+                SELECT 1 FROM checklist_results cr
+                INNER JOIN checklist_items ci ON cr.item_id = ci.id
+                WHERE cr.user_id = s.user_id
+                  AND cr.category_id = s.category_id
+                  AND cr.date_key = s.date_key
+                  AND cr.shift = s.shift
+                  AND ci.area_id = (
+                    SELECT id FROM checklist_areas 
+                    WHERE area_code = $4::varchar AND category_id = $5::integer
+                  )
+              )
+            ORDER BY s.date_key, s.shift
+          `;
+          queryParams = [userId, categoryId, `${month}%`, areaCode, categoryId];
+        } else {
+          // ✅ Query dengan 3 parameter
+          query = `
+            SELECT s.date_key, s.shift, s.signature_status
+            FROM checklist_signatures s
+            WHERE s.user_id = $1 
+              AND s.category_id = $2 
+              AND s.date_key LIKE $3
+            ORDER BY s.date_key, s.shift
+          `;
+          queryParams = [userId, categoryId, `${month}%`];
+        }
+      }
+    } else {
+      // === TABEL GROUP LEADER ===
+      if (areaCode) {
+        // ✅ Query dengan 5 parameter
+        query = `
+          SELECT s.date_key, s.shift, s.signature_status
+          FROM checklist_signatures s
+          WHERE s.user_id = $1 
+            AND s.category_id = $2 
+            AND s.date_key LIKE $3
+            AND EXISTS (
+              SELECT 1 FROM checklist_results cr
+              INNER JOIN checklist_items ci ON cr.item_id = ci.id
+              WHERE cr.user_id = s.user_id
+                AND cr.category_id = s.category_id
+                AND cr.date_key = s.date_key
+                AND cr.shift = s.shift
+                AND ci.area_id = (
+                  SELECT id FROM checklist_areas 
+                  WHERE area_code = $4::varchar AND category_id = $5::integer
+                )
+            )
+          ORDER BY s.date_key, s.shift
+        `;
+        queryParams = [userId, categoryId, `${month}%`, areaCode, categoryId];
+      } else {
+        // ✅ Query dengan 3 parameter
+        query = `
+          SELECT s.date_key, s.shift, s.signature_status
+          FROM checklist_signatures s
+          WHERE s.user_id = $1 
+            AND s.category_id = $2 
+            AND s.date_key LIKE $3
+          ORDER BY s.date_key, s.shift
+        `;
+        queryParams = [userId, categoryId, `${month}%`];
+      }
+    }
+
+    // Eksekusi query - parameter sekarang match!
+    const signatures = await pool.query<Signature>(query, queryParams);
+
+    // Format response
+    const formatted: Record<string, Record<string, string>> = {};
+    signatures.rows.forEach((row: any) => {
+      if (!formatted[row.date_key]) formatted[row.date_key] = {};
+      formatted[row.date_key][row.shift] = row.signature_status;
+    });
+
+    return NextResponse.json({
+      success: true,
+      formatted,
+      count: signatures.rows.length,
+      role,
+      categoryCode,
+      areaCode: areaCode || null
+    });
+    
+  } catch (error) {
+    console.error('❌ Get signatures error:', error);
+    return NextResponse.json({
+      error: 'Server error',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    }, { status: 500 });
+  }
+}
+
+// app/api/final-assy/save-result/route.ts
+
+import { NextRequest, NextResponse } from 'next/server'
+import pool from '@/lib/db'
+
+export async function POST(request: NextRequest) {
+  const client = await pool.connect()
+
+  try {
+    const body = await request.json()
+    const {
+      userId,
+      categoryCode,
+      itemId,
+      dateKey,
+      shift,
+      status,
+      ngDescription,
+      ngDepartment,
+      areaCode
+    } = body
+
+    if (!userId || !categoryCode || !itemId || !dateKey || !shift || !status) {
+      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
+    }
+
+    await client.query('BEGIN')
+
+    /* ======================================================
+       VALIDASI USER
+    ====================================================== */
+    const userRes = await client.query(
+      `SELECT nik FROM users WHERE id = $1 AND is_active = TRUE`,
+      [userId]
+    )
+    if (userRes.rowCount === 0) {
+      throw new Error('Invalid user')
+    }
+    const nik = userRes.rows[0].nik
+
+    /* ======================================================
+       CATEGORY
+    ====================================================== */
+    const catRes = await client.query(
+      `SELECT id FROM checklist_categories WHERE category_code = $1`,
+      [categoryCode]
+    )
+    if (catRes.rowCount === 0) {
+      throw new Error('Category not found')
+    }
+    const categoryId = catRes.rows[0].id
+
+    /* ======================================================
+       AREA (OPTIONAL)
+    ====================================================== */
+    let areaId: number | null = null
+    if (areaCode) {
+      const areaRes = await client.query(
+        `SELECT id FROM checklist_areas
+         WHERE area_code = $1 AND category_id = $2 AND is_active = TRUE`,
+        [areaCode, categoryId]
+      )
+      if ((areaRes.rowCount ?? 0) > 0) {
+        areaId = areaRes.rows[0].id
+      }
+    }
+
+    const actualItemId = Math.floor(Number(itemId))
+    const timeSlot = ''   // 🔒 WAJIB ADA (BIAR TIDAK NULL)
+
+    /* ======================================================
+       DELETE MODE
+    ====================================================== */
+    if (status === '-') {
+      await client.query(
+        `DELETE FROM checklist_results
+         WHERE user_id = $1
+           AND category_id = $2
+           AND item_id = $3
+           AND date_key = $4
+           AND shift = $5
+           AND COALESCE(time_slot,'') = $6
+           AND COALESCE(area_id,-1) = COALESCE($7,-1)`,
+        [
+          userId,
+          categoryId,
+          actualItemId,
+          dateKey,
+          shift,
+          timeSlot,
+          areaId
+        ]
+      )
+
+      await client.query('COMMIT')
+      return NextResponse.json({ success: true, deleted: true })
+    }
+
+    /* ======================================================
+       MANUAL UPSERT (AMAN)
+    ====================================================== */
+    const updateRes = await client.query(
+      `UPDATE checklist_results
+       SET status = $1,
+           ng_description = $2,
+           ng_department = $3,
+           area_id = $4,
+           updated_at = NOW()
+       WHERE user_id = $5
+         AND category_id = $6
+         AND item_id = $7
+         AND date_key = $8
+         AND shift = $9
+         AND COALESCE(time_slot,'') = $10
+         AND COALESCE(area_id,-1) = COALESCE($4,-1)`,
+      [
+        status,
+        ngDescription || null,
+        ngDepartment || null,
+        areaId,
+        userId,
+        categoryId,
+        actualItemId,
+        dateKey,
+        shift,
+        timeSlot
+      ]
+    )
+
+    if (updateRes.rowCount === 0) {
+      await client.query(
+        `INSERT INTO checklist_results (
+          user_id, nik, category_id, item_id,
+          date_key, shift, time_slot,
+          status, ng_description, ng_department,
+          area_id, submitted_at
+        ) VALUES (
+          $1,$2,$3,$4,
+          $5,$6,$7,
+          $8,$9,$10,
+          $11,NOW()
+        )`,
+        [
+          userId,
+          nik,
+          categoryId,
+          actualItemId,
+          dateKey,
+          shift,
+          timeSlot,
+          status,
+          ngDescription || null,
+          ngDepartment || null,
+          areaId
+        ]
+      )
+    }
+
+    await client.query('COMMIT')
+    return NextResponse.json({ success: true })
+
+  } catch (err: any) {
+    await client.query('ROLLBACK')
+    console.error('❌ SAVE RESULT ERROR:', err.message)
+    return NextResponse.json(
+      { error: 'Failed to save result', detail: err.message },
+      { status: 500 }
+    )
+  } finally {
+    client.release()
+  }
+}
+
+// app/api/final-assy/save-signature/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { executeQuery } from '@/lib/db-helpers';
+
+interface User {
+  id: string;
+  username: string;
+  full_name: string;
+  nik: string;
+  department: string;
+  role: string;
+}
+
+interface Category {
+  id: number;
+}
+
+interface ExistingSignature {
+  id: number;
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const { userId, categoryCode, dateKey, shift, signatureStatus, tableType } = body;
+
+    if (!userId || !categoryCode || !dateKey || !shift || !signatureStatus) {
+      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    }
+
+    // Validasi user
+    const users = await executeQuery<User>(
+      'SELECT id, username, full_name, nik, department, role FROM users WHERE id = $1 AND is_active = TRUE',
+      [userId]
+    );
+    
+    if (users.length === 0) {
+      return NextResponse.json({ error: 'Invalid user ID' }, { status: 403 });
+    }
+    const nik = users[0].nik;
+
+    // Cari kategori di database
+    const categories = await executeQuery<Category>(
+      'SELECT id FROM checklist_categories WHERE category_code = $1',
+      [categoryCode]
+    );
+    
+    if (categories.length === 0) {
+      return NextResponse.json({ 
+        error: `Category "${categoryCode}" not found in database.` 
+      }, { status: 404 });
+    }
+    
+    const categoryId = categories[0].id;
+
+    // Cek existing signature
+    const existing = await executeQuery<ExistingSignature>(
+      `SELECT id FROM checklist_signatures 
+       WHERE user_id = $1 AND category_id = $2 AND date_key = $3 AND shift = $4`,
+      [userId, categoryId, dateKey, shift]
+    );
+
+    if (existing.length > 0) {
+      // Update existing signature
+      await executeQuery(
+        `UPDATE checklist_signatures 
+         SET signature_status = $1, updated_at = CURRENT_TIMESTAMP
+         WHERE user_id = $2 AND category_id = $3 AND date_key = $4 AND shift = $5`,
+        [signatureStatus, userId, categoryId, dateKey, shift]
+      );
+      return NextResponse.json({ 
+        success: true, 
+        message: 'Signature berhasil diupdate' 
+      });
+    } else {
+      // Insert new signature
+      await executeQuery(
+        `INSERT INTO checklist_signatures 
+         (user_id, nik, category_id, date_key, shift, signature_status)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [userId, nik, categoryId, dateKey, shift, signatureStatus]
+      );
+      return NextResponse.json({ 
+        success: true, 
+        message: 'Signature berhasil disimpan' 
+      });
+    }
+  } catch (error) {
+    console.error('❌ Save signature error:', error);
+    return NextResponse.json({ 
+      error: 'Gagal menyimpan signature ke database',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    }, { status: 500 });
+  }
+}
+
+// app/api/pre-assy/get-results/route.ts
+
+import { NextRequest, NextResponse } from 'next/server';
+import pool from '@/lib/db';
+
+// Mapping dbId → frontend string ID untuk CS Remove Tool
+const CS_REMOVE_DBID_TO_FRONTEND_ID: Record<number, string> = {
+  1102: "1-X-1-A", 1103: "1-X-1-B", 1104: "1-X-2-A", 1105: "1-X-2-B",
+  1106: "1-X-3-A", 1107: "1-X-3-B", 1108: "1-X-4-A", 1109: "1-X-4-B",
+
+  1110: "2-X-1-A", 1111: "2-X-1-B", 1112: "2-X-2-A", 1113: "2-X-2-B",
+  1114: "2-X-3-A", 1115: "2-X-3-B", 1116: "2-X-4-A", 1117: "2-X-4-B",
+
+  1118: "3-X-1-A", 1119: "3-X-1-B", 1120: "3-X-2-A", 1121: "3-X-2-B",
+  1122: "3-X-3-A", 1123: "3-X-3-B", 1124: "3-X-4-A", 1125: "3-X-4-B",
+
+  1126: "4-X-1-A", 1127: "4-X-1-B", 1128: "4-X-2-A", 1129: "4-X-2-B",
+  1130: "4-X-3-A", 1131: "4-X-3-B", 1132: "4-X-4-A", 1133: "4-X-4-B",
+
+  1134: "5-X-1-A", 1135: "5-X-1-B", 1136: "5-X-2-A", 1137: "5-X-2-B",
+  1138: "5-X-3-A", 1139: "5-X-3-B", 1140: "5-X-4-A", 1141: "5-X-4-B",
+
+  1142: "6-X-1-A", 1143: "6-X-1-B", 1144: "6-X-2-A", 1145: "6-X-2-B",
+  1146: "6-X-3-A", 1147: "6-X-3-B", 1148: "6-X-4-A", 1149: "6-X-4-B",
+
+  1150: "7-X-1-A", 1151: "7-X-1-B", 1152: "7-X-2-A", 1153: "7-X-2-B",
+  1154: "7-X-3-A", 1155: "7-X-3-B", 1156: "7-X-4-A", 1157: "7-X-4-B",
+
+  1158: "8-X-1-A", 1159: "8-X-1-B", 1160: "8-X-2-A", 1161: "8-X-2-B",
+  1162: "8-X-3-A", 1163: "8-X-3-B", 1164: "8-X-4-A", 1165: "8-X-4-B",
+
+  1166: "9-X-1-A", 1167: "9-X-1-B", 1168: "9-X-2-A", 1169: "9-X-2-B",
+  1170: "9-X-3-A", 1171: "9-X-3-B", 1172: "9-X-4-A", 1173: "9-X-4-B",
+
+  1174: "10-X-1-A", 1175: "10-X-1-B", 1176: "10-X-2-A", 1177: "10-X-2-B",
+  1178: "10-X-3-A", 1179: "10-X-3-B", 1180: "10-X-4-A", 1181: "10-X-4-B",
+
+  1182: "11-X-1-A", 1183: "11-X-1-B", 1184: "11-X-2-A", 1185: "11-X-2-B",
+  1186: "11-X-3-A", 1187: "11-X-3-B", 1188: "11-X-4-A", 1189: "11-X-4-B",
+
+  1190: "12-X-1-A", 1191: "12-X-1-B", 1192: "12-X-2-A", 1193: "12-X-2-B",
+  1194: "12-X-3-A", 1195: "12-X-3-B", 1196: "12-X-4-A", 1197: "12-X-4-B",
+
+  1198: "13-X-1-A", 1199: "13-X-1-B", 1200: "13-X-2-A", 1201: "13-X-2-B",
+  1202: "13-X-3-A", 1203: "13-X-3-B", 1204: "13-X-4-A", 1205: "13-X-4-B",
+
+  1206: "14-X-1-A", 1207: "14-X-1-B", 1208: "14-X-2-A", 1209: "14-X-2-B",
+  1210: "14-X-3-A", 1211: "14-X-3-B", 1212: "14-X-4-A", 1213: "14-X-4-B",
+
+  // EXTRACTION JIG (NO 15)
+  1214: "15-R-1-A",
+  1215: "15-G-1-A",
+  1216: "15-W-1-A",
+  1217: "15-Y-1-A",
+  1218: "15-W-1-B",
+  1219: "15-R-1-B",
+  1220: "15-G-1-B",
+};
+
+export async function GET(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const userId = searchParams.get('userId');
+    const categoryCode = searchParams.get('categoryCode');
+    const month = searchParams.get('month');
+    const areaCode = searchParams.get('areaCode');
+
+    if (!userId || !categoryCode || !month) {
+      return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
+    }
+
+    // Validasi user
+    const userCheckResult = await pool.query(
+      'SELECT id FROM users WHERE id = $1 AND is_active = TRUE',
+      [userId]
+    );
+    if (userCheckResult.rows.length === 0) {
+      return NextResponse.json({ error: 'Invalid user' }, { status: 403 });
+    }
+
+    // Ambil category_id
+    const categoryResult = await pool.query(
+      'SELECT id FROM checklist_categories WHERE category_code = $1',
+      [categoryCode]
+    );
+    if (categoryResult.rows.length === 0) {
+      return NextResponse.json({ error: 'Category not found' }, { status: 404 });
+    }
+    const categoryId = categoryResult.rows[0].id;
+
+    // =========================================================
+    // 🔹 BUILD QUERY - Filter area di checklist_results.area_id
+    // =========================================================
+    let areaCondition = '';
+    let areaParams: any[] = [];
+    let areaId: number | null = null;
+
+    if (areaCode) {
+      const areaResult = await pool.query(
+        `SELECT id FROM checklist_areas 
+         WHERE area_code = $1 AND category_id = $2 AND is_active = TRUE`,
+        [areaCode, categoryId]
+      );
+
+      if (areaResult.rows.length > 0) {
+        areaId = areaResult.rows[0].id;
+        areaCondition = 'AND r.area_id = $4';
+        areaParams = [areaId];
+        console.log(`✅ Filtering by area_id: ${areaId} (${areaCode})`);
+      } else {
+        console.warn(`⚠️ Area tidak ditemukan: ${areaCode}`);
+      }
+    }
+
+    // Query ke checklist_results
+    const resultsQuery = await pool.query(
+      `SELECT 
+         r.date_key, 
+         r.item_id, 
+         r.shift, 
+         r.status, 
+         r.ng_description, 
+         r.ng_department, 
+         r.submitted_at, 
+         r.time_slot,
+         r.area_id
+       FROM checklist_results r
+       WHERE r.user_id = $1  
+         AND r.category_id = $2 
+         AND r.date_key LIKE $3 
+         ${areaCondition}
+       ORDER BY r.date_key, r.item_id, r.shift`,
+      [userId, categoryId, `${month}%`, ...areaParams]
+    );
+
+    const isCSRemoveTool = categoryCode === 'pre-assy-cs-remove-tool';
+    const isDailyCheckIns = categoryCode === 'pre-assy-daily-check-ins';
+    const isCCStripping = categoryCode === 'pre-assy-cc-stripping-gl';
+
+    const formatted: Record<string, Record<string, any>> = {};
+
+    resultsQuery.rows.forEach((row: any) => {
+      if (!formatted[row.date_key]) formatted[row.date_key] = {};
+
+      let itemKey: string;
+
+      if (isCSRemoveTool) {
+        // Convert db item_id ke frontend string ID
+        const frontendId = CS_REMOVE_DBID_TO_FRONTEND_ID[row.item_id];
+        if (frontendId) {
+          itemKey = frontendId;
+        } else {
+          console.warn(`⚠️ item_id ${row.item_id} tidak ditemukan di mapping`);
+          itemKey = `${row.item_id}-${row.shift}`;
+        }
+      } else if (isDailyCheckIns) {
+        // Daily Check Ins: gunakan time_slot sebagai checkpointId
+        if (row.time_slot) {
+          itemKey = `${row.time_slot}-${row.shift}`;
+        } else {
+          itemKey = `${row.item_id}-${row.shift}`;
+        }
+      } else if (isCCStripping) {
+        // ✅ FIX: CC Stripping PAKAI time_slot karena frontend renderStatusCell
+        // membentuk key dengan format: `${baseId}-${shift}-${timeSlot}`
+        // Contoh: "1-A-01.00", "1-A-04.00", dst
+        if (row.time_slot && row.time_slot !== '') {
+          itemKey = `${row.item_id}-${row.shift}-${row.time_slot}`;
+        } else {
+          // Fallback untuk data lama yang tersimpan tanpa time_slot
+          itemKey = `${row.item_id}-${row.shift}`;
+        }
+      } else {
+        itemKey = row.time_slot
+          ? `${row.item_id}-${row.shift}-${row.time_slot}`
+          : `${row.item_id}-${row.shift}`;
+      }
+
+      formatted[row.date_key][itemKey] = {
+        status: row.status,
+        ngCount: row.status === 'NG' ? 1 : 0,
+        items: [],
+        notes: '',
+        submittedAt: row.submitted_at,
+        submittedBy: 'System',
+        ngDescription: row.ng_description || '',
+        ngDepartment: row.ng_department || 'QA',
+        areaId: row.area_id
+      };
+    });
+
+    console.log(`✅ Loaded ${resultsQuery.rows.length} results for ${categoryCode}`);
+
+    return NextResponse.json({ 
+      success: true, 
+      formatted,
+      areaCode: areaCode || null,
+      areaId: areaId,
+      count: resultsQuery.rows.length
+    });
+  } catch (error) {
+    console.error('❌ Get results error:', error);
+    return NextResponse.json({ error: 'Server error' }, { status: 500 });
+  }
+}
+
+// app/api/pre-assy/get-signatures/route.ts
+
+import { NextRequest, NextResponse } from 'next/server';
+import pool from '@/lib/db';
+
+export async function GET(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const userId = searchParams.get('userId');
+    const categoryCode = searchParams.get('categoryCode');
+    const month = searchParams.get('month');
+    const areaCode = searchParams.get('areaCode'); // ← TAMBAHAN: Filter area
+
+    if (!userId || !categoryCode || !month) {
+      return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
+    }
+
+    // Validasi user
+    const userCheckResult = await pool.query(
+      'SELECT id FROM users WHERE id = $1 AND is_active = TRUE',
+      [userId]
+    );
+    if (userCheckResult.rows.length === 0) {
+      return NextResponse.json({ error: 'Invalid user' }, { status: 403 });
+    }
+
+    // Ambil category_id
+    const categoryResult = await pool.query(
+      'SELECT id FROM checklist_categories WHERE category_code = $1',
+      [categoryCode]
+    );
+    if (categoryResult.rows.length === 0) {
+      return NextResponse.json({ error: 'Category not found' }, { status: 404 });
+    }
+    const categoryId = categoryResult.rows[0].id;
+
+    // ✅ BUILD QUERY DENGAN FILTER AREA (OPTIONAL)
+    let areaCondition = '';
+    let areaParams: any[] = [];
+    
+    if (areaCode) {
+      // Filter signature berdasarkan hasil checklist yang memiliki area_id terkait
+      areaCondition = `
+        AND EXISTS (
+          SELECT 1 FROM checklist_results cr
+          INNER JOIN checklist_items ci ON cr.item_id = ci.id
+          WHERE cr.user_id = s.user_id
+            AND cr.category_id = s.category_id
+            AND cr.date_key = s.date_key
+            AND cr.shift = s.shift
+            AND ci.area_id = (
+              SELECT id FROM checklist_areas 
+              WHERE area_code = $4 AND category_id = s.category_id
+            )
+        )
+      `;
+      areaParams = [areaCode];
+    }
+
+    // Ambil signatures dengan filter area opsional
+    const signaturesQuery = await pool.query(
+      `SELECT s.date_key, s.shift, s.signature_status
+       FROM checklist_signatures s
+       WHERE s.user_id = $1 
+         AND s.category_id = $2 
+         AND s.date_key LIKE $3
+         ${areaCondition}
+       ORDER BY s.date_key, s.shift`,
+      [userId, categoryId, `${month}%`, ...areaParams]
+    );
+
+    // Format data
+    const formatted: Record<string, Record<string, string>> = {};
+    signaturesQuery.rows.forEach(row => {
+      if (!formatted[row.date_key]) formatted[row.date_key] = {};
+      formatted[row.date_key][row.shift] = row.signature_status;
+    });
+
+    return NextResponse.json({ 
+      success: true, 
+      formatted,
+      areaCode: areaCode || null
+    });
+    
+  } catch (error) {
+    console.error('❌ Get signatures error:', error);
+    return NextResponse.json({ error: 'Server error' }, { status: 500 });
+  }
+}
+
+// app/api/pre-assy/save-result/route.ts
+
+import { NextRequest, NextResponse } from 'next/server'
+import pool from '@/lib/db'
+
+export async function POST(request: NextRequest) {
+  const client = await pool.connect()
+
+  try {
+    const body = await request.json()
+
+    console.log("🔥 SAVE RESULT BODY:", body)
+
+    const {
+      userId,
+      categoryCode,
+      itemId,
+      dateKey,
+      shift,
+      status,
+      ngDescription,
+      ngDepartment,
+      timeSlot,
+      areaCode
+    } = body
+
+    /* ======================================================
+       VALIDATION
+    ====================================================== */
+    if (
+      !userId ||
+      !categoryCode ||
+      itemId === undefined ||
+      !dateKey ||
+      !shift ||
+      !status
+    ) {
+      return NextResponse.json(
+        { error: 'Missing required fields' },
+        { status: 400 }
+      )
+    }
+
+    await client.query('BEGIN')
+
+    /* ======================================================
+       VALIDATE USER
+    ====================================================== */
+    const userRes = await client.query(
+      `SELECT nik FROM users 
+       WHERE id = $1 AND is_active = TRUE`,
+      [userId]
+    )
+
+    if (userRes.rowCount === 0) {
+      throw new Error('Invalid user')
+    }
+
+    const nik = userRes.rows[0].nik
+
+    /* ======================================================
+       GET CATEGORY
+    ====================================================== */
+    const catRes = await client.query(
+      `SELECT id FROM checklist_categories 
+       WHERE category_code = $1`,
+      [categoryCode]
+    )
+
+    if (catRes.rowCount === 0) {
+      throw new Error('Category not found')
+    }
+
+    const categoryId = catRes.rows[0].id
+
+    /* ======================================================
+       NORMALIZE ITEM ID
+    ====================================================== */
+    const actualItemId =
+      typeof itemId === 'number'
+        ? Math.floor(itemId)
+        : Math.floor(parseFloat(itemId))
+
+    /* ======================================================
+       RESOLVE AREA
+    ====================================================== */
+    let areaId: number | null = null
+
+    if (areaCode) {
+      const areaRes = await client.query(
+        `SELECT id 
+         FROM checklist_areas
+         WHERE area_code = $1
+           AND category_id = $2
+           AND is_active = TRUE`,
+        [areaCode, categoryId]
+      )
+
+      if (areaRes.rowCount != null && areaRes.rowCount > 0) {
+        areaId = areaRes.rows[0].id
+      }
+    }
+
+    /* ======================================================
+       NORMALIZE TIME SLOT
+       Semua kategori gunakan timeSlot dari request.
+       Jika tidak ada, default ke string kosong ''.
+    ====================================================== */
+    const normalizedTimeSlot = timeSlot ?? ''
+
+    /* ======================================================
+       DELETE MODE
+    ====================================================== */
+    if (status === '-') {
+      await client.query(
+        `DELETE FROM checklist_results
+         WHERE user_id = $1
+           AND category_id = $2
+           AND item_id = $3
+           AND date_key = $4
+           AND shift = $5
+           AND time_slot = $6
+           AND COALESCE(area_id,-1) = COALESCE($7,-1)`,
+        [
+          userId,
+          categoryId,
+          actualItemId,
+          dateKey,
+          shift,
+          normalizedTimeSlot,
+          areaId
+        ]
+      )
+
+      await client.query('COMMIT')
+
+      return NextResponse.json({
+        success: true,
+        deleted: true
+      })
+    }
+
+    /* ======================================================
+       ✅ UPSERT YANG BENAR
+       
+       PENYEBAB DOUBLE NG:
+       Ketika user pilih "NG", frontend memanggil saveResultToDB DUA KALI:
+         1. Di handleStatusChange → save "NG" dengan ngDescription kosong
+         2. Di saveNgReport (setelah modal) → save "NG" lagi dengan ngDescription terisi
+
+       Upsert ini HARUS selalu UPDATE jika sudah ada record dengan
+       kombinasi (user_id, category_id, item_id, date_key, shift, time_slot, area_id)
+       yang sama — tidak boleh INSERT baru.
+
+       ✅ SOLUSI: Gunakan INSERT ... ON CONFLICT DO UPDATE dengan
+       conflict target yang benar menggunakan expression index.
+    ====================================================== */
+    await client.query(
+      `
+      INSERT INTO checklist_results (
+        user_id,
+        nik,
+        category_id,
+        item_id,
+        date_key,
+        shift,
+        time_slot,
+        status,
+        ng_description,
+        ng_department,
+        area_id,
+        submitted_at,
+        updated_at
+      )
+      VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW(),NOW()
+      )
+      ON CONFLICT (
+        user_id,
+        category_id,
+        item_id,
+        date_key,
+        shift,
+        time_slot,
+        COALESCE(area_id,-1)
+      )
+      DO UPDATE SET
+        status        = EXCLUDED.status,
+        ng_description = EXCLUDED.ng_description,
+        ng_department  = EXCLUDED.ng_department,
+        area_id        = EXCLUDED.area_id,
+        updated_at     = NOW()
+      `,
+      [
+        userId,
+        nik,
+        categoryId,
+        actualItemId,
+        dateKey,
+        shift,
+        normalizedTimeSlot,
+        status,
+        ngDescription?.trim() || null,
+        ngDepartment?.trim() || null,
+        areaId
+      ]
+    )
+
+    await client.query('COMMIT')
+
+    return NextResponse.json({
+      success: true,
+      areaId
+    })
+
+  } catch (err: any) {
+    await client.query('ROLLBACK')
+
+    console.error('❌ PRE-ASSY SAVE ERROR:', err.message)
+
+    return NextResponse.json(
+      { error: 'Failed to save result', detail: err.message },
+      { status: 500 }
+    )
+  } finally {
+    client.release()
+  }
+}
+
+// app/api/pre-assy/save-signature/route.ts
+
+import { NextRequest, NextResponse } from 'next/server';
+import pool from '@/lib/db';
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const { userId, categoryCode, dateKey, shift, signatureStatus } = body;
+
+    if (!userId || !categoryCode || !dateKey || !shift || !signatureStatus) {
+      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    }
+
+    // Validasi user
+    const userCheckResult = await pool.query(
+      'SELECT id, nik FROM users WHERE id = $1 AND is_active = TRUE',
+      [userId]
+    );
+    if (userCheckResult.rows.length === 0) {
+      return NextResponse.json({ error: 'Invalid user ID' }, { status: 403 });
+    }
+    const nik = userCheckResult.rows[0].nik;
+
+    // Cari kategori
+    const categoryResult = await pool.query(
+      'SELECT id FROM checklist_categories WHERE category_code = $1',
+      [categoryCode]
+    );
+    if (categoryResult.rows.length === 0) {
+      return NextResponse.json({ 
+        error: `Category "${categoryCode}" not found` 
+      }, { status: 404 });
+    }
+    const categoryId = categoryResult.rows[0].id;
+
+    // Jika "-", hapus
+    if (signatureStatus === '-') {
+      await pool.query(
+        `DELETE FROM checklist_signatures 
+         WHERE user_id = $1 AND category_id = $2 AND date_key = $3 AND shift = $4`,
+        [userId, categoryId, dateKey, shift]
+      );
+      return NextResponse.json({ success: true, message: 'Tanda tangan dihapus' });
+    }
+
+    // PostgreSQL upsert menggunakan ON CONFLICT
+    await pool.query(
+      `INSERT INTO checklist_signatures 
+       (user_id, nik, category_id, date_key, shift, signature_status, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW())
+       ON CONFLICT (user_id, category_id, date_key, shift)
+       DO UPDATE SET
+         signature_status = EXCLUDED.signature_status,
+         updated_at = NOW()`,
+      [userId, nik, categoryId, dateKey, shift, signatureStatus]
+    );
+
+    return NextResponse.json({ success: true, message: 'Tanda tangan tersimpan' });
+  } catch (error) {
+    console.error('❌ Save signature error:', error);
+    return NextResponse.json({ error: 'Gagal menyimpan tanda tangan' }, { status: 500 });
+  }
+}
