@@ -26,24 +26,39 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Missing type parameter' }, { status: 400 });
     }
 
-    // Cari category_id berdasarkan type
+    // ✅ Cari category_id berdasarkan type - SUPPORT KEDUA TYPE
     let categoryId: number;
     
     if (type === 'inspector') {
       const categories = await executeQuery<{ id: number }>(
         'SELECT id FROM checklist_categories WHERE category_code = $1',
-        ['final-assy-inspector']
+        ['final-assy-inspector']  // ✅ Category untuk Inspector
       );
       
       if (categories.length === 0) {
         return NextResponse.json({ error: 'Category not found' }, { status: 404 });
       }
       categoryId = categories[0].id;
+      
+    } else if (type === 'group-leader') {
+      // ✅ TAMBAHKAN SUPPORT UNTUK GROUP LEADER
+      const categories = await executeQuery<{ id: number }>(
+        'SELECT id FROM checklist_categories WHERE category_code = $1',
+        ['final-assy-gl']  // ✅ Category untuk Group Leader
+      );
+      
+      if (categories.length === 0) {
+        return NextResponse.json({ error: 'Category not found' }, { status: 404 });
+      }
+      categoryId = categories[0].id;
+      
     } else {
-      return NextResponse.json({ error: 'Invalid type' }, { status: 400 });
+      return NextResponse.json({ 
+        error: `Invalid type: ${type}. Expected 'inspector' or 'group-leader'` 
+      }, { status: 400 });
     }
 
-    // Ambil data dari database
+    // ✅ Ambil data dari database dengan category_id yang sesuai
     const items = await executeQuery<ChecklistItem>(
       `SELECT 
          id, 
@@ -60,11 +75,11 @@ export async function GET(request: NextRequest) {
          show_in_double_check
        FROM checklist_items 
        WHERE category_id = $1 AND is_active = TRUE
-       ORDER BY sort_order`,
+       ORDER BY sort_order, id`,
       [categoryId]
     );
 
-    // Transformasi: Kelompokkan berdasarkan (no, item_check, check_point, metode_check)
+    // ✅ Transformasi: Kelompokkan berdasarkan (no, item_check, check_point, metode_check)
     const groupedItems: Record<string, any> = {};
     
     items.forEach((row) => {
@@ -90,18 +105,23 @@ export async function GET(request: NextRequest) {
         };
       }
       
-      // Tambahkan shift (A/B) ke dalam array
+      // Tambahkan shift (A/B) ke dalam array jika belum ada
       if (!groupedItems[key].shifts.some((s: any) => s.shift === row.shift)) {
         groupedItems[key].shifts.push({ shift: row.shift });
       }
     });
 
+    console.log(`✅ Loaded ${Object.values(groupedItems).length} checklist items for type: ${type}`);
+
     return NextResponse.json({ 
       success: true, 
-      data: Object.values(groupedItems) 
+      data: Object.values(groupedItems),
+      type,
+      categoryId
     });
+    
   } catch (error) {
-    console.error('❌ Error:', error);
+    console.error('❌ Error fetching checklist items:', error);
     return NextResponse.json({ 
       error: 'Server error',
       details: error instanceof Error ? error.message : 'Unknown error'

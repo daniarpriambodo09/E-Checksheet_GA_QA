@@ -1,6 +1,6 @@
 // app/status-final-assy/page.tsx
 "use client"
-import { useState, useMemo, useEffect, useCallback } from "react"
+import { useState, useMemo, useEffect, useCallback, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { useAuth } from "@/lib/auth-context"
 import React from "react"
@@ -120,11 +120,7 @@ function AreaFilter({
       gap: '8px',
       marginLeft: 'auto'
     }}>
-      <label htmlFor="area-select" className="filter-label" style={{ 
-        fontWeight: '600',
-        fontSize: '14px',
-        color: '#334155'
-      }}>Area:</label>
+      <label htmlFor="area-select" className="filter-label">Area:</label>
       <select
         id="area-select"
         value={selectedArea}
@@ -132,15 +128,8 @@ function AreaFilter({
         disabled={isDisabled}
         className="area-dropdown"
         style={{
-          padding: '8px 12px',
-          borderRadius: '6px',
-          border: '1px solid #cbd5e1',
-          fontSize: '14px',
-          fontWeight: '500',
-          color: '#1e293b',
           backgroundColor: isDisabled ? '#f1f5f9' : 'white',
           cursor: isDisabled ? 'not-allowed' : 'pointer',
-          minWidth: '200px'
         }}
       >
         {/* ✅ TIDAK ADA OPSI "Semua Area" - Hanya daftar area dari DB */}
@@ -174,7 +163,7 @@ const DEFAULT_AREA_BY_CATEGORY: Record<string, string> = {
 
 export default function FinalAssyStatusPage() {
   const router = useRouter()
-  const { user, loading } = useAuth()
+  const { user, loading, isInitialized } = useAuth()
   
   // ===== ALL HOOKS DECLARED AT TOP LEVEL (BEFORE ANY EARLY RETURNS) =====
   const [gaugeResults, setGaugeResults] = useState<
@@ -777,12 +766,21 @@ export default function FinalAssyStatusPage() {
   ])
   
   // ===== ALL EFFECTS DECLARED AFTER STATE HOOKS =====
+  const hasBeenAuthenticated = useRef(false);
+
   useEffect(() => {
-    // ✅ Jangan redirect jika masih loading
-    if (!loading && !user) {
-      router.push("/login-page")
+    if (user) {
+      hasBeenAuthenticated.current = true; // ✅ Catat bahwa user sudah pernah login
     }
-  }, [user, loading, router])
+    
+    // ✅ Hanya redirect jika:
+    // 1. Tidak sedang loading
+    // 2. User null
+    // 3. User BELUM PERNAH authenticated (bukan race condition)
+    if (isInitialized && !loading && !user && !hasBeenAuthenticated.current) {
+      router.push("/login-page");
+  }
+}, [user, loading, isInitialized, router]);
   
   const currentRole = user?.role || "inspector-qa"
   const isGroupLeader = currentRole === "group-leader-qa"
@@ -801,35 +799,16 @@ export default function FinalAssyStatusPage() {
     status: "OK" | "NG" | "-"
   ) => {
     const dateKey = getDateKey(date);
-    const key = `${dateKey}-${shift}`;
+    const key = `${dateKey}-${shift}-${selectedArea}`;
 
-    // Update local state gaugeResults
     setGaugeResults((prev) => ({
       ...prev,
       [key]: { gaugeId, status },
     }));
-
-    // Opsional: update groupLeaderResults juga agar tabel konsisten
-    const itemKey = `4-${shift}`; // checkpoint id=4
-    setGroupLeaderResults((prev) => {
-      const newResults = JSON.parse(JSON.stringify(prev));
-      newResults[dateKey] = newResults[dateKey] || {};
-      newResults[dateKey][itemKey] = {
-        status,
-        ngCount: status === "NG" ? 1 : 0,
-        items: [],
-        notes: "",
-        submittedAt: new Date().toISOString(),
-        submittedBy: user?.fullName || "Inspector",
-        ngDescription: "",
-        ngDepartment: "QA",
-      };
-      return newResults;
-    });
-  }, [user?.fullName])
+  }, [selectedArea]);
   
   // Update viewAs when user role changes and component is loaded
-  useEffect(() => {
+  useEffect(() => { 
     if (!loading && user) {
       if (isGroupLeader) {
         setViewAs("group-leader")
@@ -854,15 +833,6 @@ export default function FinalAssyStatusPage() {
   }, [])
 
   // ===== EARLY RETURNS NOW HAPPEN AFTER ALL HOOKS =====
-  if (loading) {
-    return (
-      <div style={{ textAlign: 'center', padding: '50px' }}>
-        <p>Memuat...</p>
-      </div>
-    )
-  }
-
-  if (!user) return null
   
   // ✅ PERMISSION CHECKING YANG JELAS
   const hasPermission = {
@@ -1132,12 +1102,12 @@ export default function FinalAssyStatusPage() {
       setIsLoading(false);
     }
   },
-  [user?.id, activeMonth, activeYear, viewAs, selectedArea, currentRole]);
+  [user?.id, activeMonth, activeYear, viewAs, selectedArea]);
 
   // ✅ Load data saat area berubah
   useEffect(() => {
     loadDataFromDB();
-  }, [loadDataFromDB]);
+  }, [user?.id, activeMonth, activeYear, viewAs, selectedArea]); 
   
   // === GANTI januaryDates DENGAN dynamicDates ===
   const dynamicDates = useMemo(() => {
@@ -1344,7 +1314,8 @@ export default function FinalAssyStatusPage() {
 
     // ✅ KHUSUS CHECKPOINT 4 → Gunakan Scan QR
     if (checkpoint.id === 4) {
-      const gaugeKey = `${dateKey}-${shift}`;
+      // ✅ KEY DENGAN AREA untuk gaugeResults
+      const gaugeKey = `${dateKey}-${shift}-${selectedArea}`;
       const gaugeResult = gaugeResults[gaugeKey];
       const gaugeStatus = gaugeResult?.status || currentStatus;
 
@@ -1354,6 +1325,7 @@ export default function FinalAssyStatusPage() {
           shift={shift}
           userId={user?.id || ""}
           nik={user?.nik || ""}
+          areaCode={selectedArea}  // ✅ KIRIM areaCode
           existingStatus={gaugeStatus as "OK" | "NG" | "-"}
           editable={isEditable}
           onSaved={(gaugeId, status) =>
@@ -1623,45 +1595,45 @@ export default function FinalAssyStatusPage() {
     ? "CHECK SHEET PATROLI HARIAN GROUP LEADER INSPEKSI F/A"
     : "Daily Check Inspector Final Assy";
   
-  if (!user) return null;
+  if (loading) {
+    return (
+      <div style={{ textAlign: 'center', padding: '50px' }}>
+        <p>Memuat...</p>
+      </div>
+    )
+  }
+
+  if (!user) return null
   
   return (
     <>
       <Sidebar userName={user.fullName || user.username} />
       <div
-        style={{
-          maxWidth: "1800px",
-          paddingLeft: "95px",
-          paddingRight: "25px",
-          paddingTop: "25px",
-          paddingBottom: "25px",
-        }}
         className="page-content"
       >
-        {title}
-        {isGroupLeader && (
-          <select
-            value={viewAs}
-            onChange={(e) => handleViewChange(e.target.value as "group-leader" | "inspector")}
-            className="view-dropdown-fa"
-            style={{
-              padding: '8px 12px',
-              fontSize: '14px',
-              borderRadius: '4px',
-              border: '1px solid #ccc'
-            }}
-          >
-            <option value="group-leader">Daily Check GL</option>
-            <option value="inspector">Daily Check Inspector</option>
-          </select>
-        )}
+        <div className="header">
+          <h1>
+            {title}
+          </h1>
+          <div className="header-controls">
+            {isGroupLeader && (
+              <select
+                value={viewAs}
+                onChange={(e) => handleViewChange(e.target.value as "group-leader" | "inspector")}
+                className="view-dropdown-fa"
+              >
+                <option value="group-leader">Daily Check GL</option>
+                <option value="inspector">Daily Check Inspector</option>
+              </select>
+            )}
 
-        <div className="role-info">
-          Role: <span className="role-badge">{isGroupLeader ? "Group Leader QA" : "Inspector QA"}</span>
+            <div className="role-info">
+              Role: <span className="role-badge">{isGroupLeader ? "Group Leader QA" : "Inspector QA"}</span>
+            </div>
+          </div>
+          {/* ✅ AREA FILTER - Tanpa opsi "Semua Area", default area aktif */}
         </div>
-        
-        {/* ✅ AREA FILTER - Tanpa opsi "Semua Area", default area aktif */}
-        <div style={{ display: 'flex', gap: '10px', marginBottom: '15px', flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="filter-area">
           <AreaFilter
             categoryCode={categoryCode}
             selectedArea={selectedArea}
@@ -1670,492 +1642,476 @@ export default function FinalAssyStatusPage() {
             defaultAreaCode={DEFAULT_AREA_BY_CATEGORY[categoryCode]}
           />
         </div>
-      </div>
 
-      {/* === NAVIGASI BULAN === */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', paddingLeft: '95px', paddingRight: '25px' }}>
-        <button
-          onClick={() => changeMonth(-1)}
-          style={{
-            padding: '8px 16px',
-            backgroundColor: '#1976d2',
-            color: 'white',
-            border: 'none',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            fontWeight: 'bold'
-          }}
-        >
-          ← Bulan Lalu
-        </button>
-        <span style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>
-          {getMonthName(activeMonth)} {activeYear}
-        </span>
-        <button
-          onClick={() => changeMonth(1)}
-          style={{
-            padding: '8px 16px',
-            backgroundColor: '#1976d2',
-            color: 'white',
-            border: 'none',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            fontWeight: 'bold'
-          }}
-        >
-          Bulan Depan →
-        </button>
-      </div>
+        {/* === NAVIGASI BULAN === */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+          <button
+            className="month-button"
+            onClick={() => changeMonth(-1)}
+          >
+            ← Bulan Lalu
+          </button>
+          <span style={{ fontSize: '14px', fontWeight: 'bold' }}>
+            {getMonthName(activeMonth)} {activeYear}
+          </span>
+          <button
+            className="month-button"
+            onClick={() => changeMonth(1)}
+          >
+            Bulan Depan →
+          </button>
+        </div>
 
-      {/* === LOADING INDICATOR === */}
-      {isLoading && (
-        <div style={{ textAlign: 'center', padding: '20px' }}>
+        {/* === LOADING INDICATOR === */}
+        {isLoading && (
+          <div style={{ textAlign: 'center', padding: '20px' }}>
+            <div style={{ 
+              display: 'inline-block', 
+              width: '40px', 
+              height: '40px', 
+              border: '4px solid #1976d2', 
+              borderTopColor: 'transparent', 
+              borderRadius: '50%', 
+              animation: 'spin 1s linear infinite' 
+            }}></div>
+            <p style={{ marginTop: '10px', color: '#666' }}>Memuat data...</p>
+          </div>
+        )}
+
+        {/* === ERROR MESSAGE === */}
+        {error && (
           <div style={{ 
-            display: 'inline-block', 
-            width: '40px', 
-            height: '40px', 
-            border: '4px solid #1976d2', 
-            borderTopColor: 'transparent', 
-            borderRadius: '50%', 
-            animation: 'spin 1s linear infinite' 
-          }}></div>
-          <p style={{ marginTop: '10px', color: '#666' }}>Memuat data...</p>
-        </div>
-      )}
+            backgroundColor: '#fee', 
+            color: '#c33', 
+            padding: '12px', 
+            borderRadius: '8px', 
+            marginBottom: '15px',
+            borderLeft: '4px solid #c33',
+            marginLeft: '95px',
+            marginRight: '25px'
+          }}>
+            <strong>Error: </strong> {error}
+          </div>
+        )}
 
-      {/* === ERROR MESSAGE === */}
-      {error && (
-        <div style={{ 
-          backgroundColor: '#fee', 
-          color: '#c33', 
-          padding: '12px', 
-          borderRadius: '8px', 
-          marginBottom: '15px',
-          borderLeft: '4px solid #c33',
-          marginLeft: '95px',
-          marginRight: '25px'
-        }}>
-          <strong>Error: </strong> {error}
-        </div>
-      )}
-
-      <div className="table-wrapper" style={{ overflowX: 'auto', paddingLeft: '95px', paddingRight: '25px' }}>
-        {showGroupLeaderTable ? (
-          <table className="status-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem' }}>
-            <thead>
-              <tr>
-                <th rowSpan={2} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center', minWidth: '40px' }}>NO</th>
-                <th rowSpan={2} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center', minWidth: '280px' }}>CHECK POINT</th>
-                <th rowSpan={2} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center', minWidth: '45px' }}>SHIFT</th>
-                <th rowSpan={2} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center', minWidth: '90px' }}>WAKTU CHECK</th>
-                <th rowSpan={2} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center', minWidth: '90px' }}>STANDARD / METODE</th>
-                <th colSpan={dynamicDates.length} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center', backgroundColor: '#e3f2fd', fontWeight: 'bold', fontSize: '1rem' }}>
-                  {getMonthName(activeMonth)} {activeYear}
-                </th>
-              </tr>
-              <tr>
-                {dynamicDates.map((date) => (
-                  <th 
-                    key={date} 
-                    style={{ 
-                      border: '1px solid #000', 
-                      padding: '6px 4px', 
-                      textAlign: 'center', 
-                      minWidth: '32px',
-                      backgroundColor: isCurrentMonth && date === today ? '#fff8e1' : 'inherit',
-                      color: isCurrentMonth && date === today ? '#e65100' : 'inherit',
-                      fontWeight: isCurrentMonth && date === today ? 'bold' : 'normal'
-                    }}
-                  >
-                    {date}
+        <div className="table-wrapper" style={{ overflowX: 'auto' }}>
+          {showGroupLeaderTable ? (
+            <table className="status-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem' }}>
+              <thead>
+                <tr>
+                  <th rowSpan={2} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center', minWidth: '40px' }}>NO</th>
+                  <th rowSpan={2} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center', minWidth: '280px' }}>CHECK POINT</th>
+                  <th rowSpan={2} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center', minWidth: '45px' }}>SHIFT</th>
+                  <th rowSpan={2} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center', minWidth: '90px' }}>WAKTU CHECK</th>
+                  <th rowSpan={2} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center', minWidth: '90px' }}>STANDARD / METODE</th>
+                  <th colSpan={dynamicDates.length} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center', backgroundColor: '#e3f2fd', fontWeight: 'bold', fontSize: '1rem' }}>
+                    {getMonthName(activeMonth)} {activeYear}
                   </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {checkpoints.map((cp) => {
-                const currentNo = cp.no;
-                const sameNoItems = checkpoints.filter(c => c.no === currentNo);
-                const isFirstOfGroup = sameNoItems[0].id === cp.id;
-                const groupRowSpan = sameNoItems.reduce((sum, item) => {
-                  return sum + item.shifts.filter(s => s.waktuCheck !== " ").length;
-                }, 0);
+                </tr>
+                <tr>
+                  {dynamicDates.map((date) => (
+                    <th 
+                      key={date} 
+                      style={{ 
+                        border: '1px solid #000', 
+                        padding: '6px 4px', 
+                        textAlign: 'center', 
+                        minWidth: '32px',
+                        backgroundColor: isCurrentMonth && date === today ? '#fff8e1' : 'inherit',
+                        color: isCurrentMonth && date === today ? '#e65100' : 'inherit',
+                        fontWeight: isCurrentMonth && date === today ? 'bold' : 'normal'
+                      }}
+                    >
+                      {date}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {checkpoints.map((cp) => {
+                  const currentNo = cp.no;
+                  const sameNoItems = checkpoints.filter(c => c.no === currentNo);
+                  const isFirstOfGroup = sameNoItems[0].id === cp.id;
+                  const groupRowSpan = sameNoItems.reduce((sum, item) => {
+                    return sum + item.shifts.filter(s => s.waktuCheck !== " ").length;
+                  }, 0);
 
-                if (cp.type === "special") {
-                  return (
-                    <tr key={`cp-${cp.id}`}>
-                      <td style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}></td>
-                      <td colSpan={3} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'left' }}>{cp.checkPoint}</td>
-                      <td style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>{cp.standard}</td>
-                      {dynamicDates.map((date) => {
-                        const esoText = renderESOCell(date, "A");
-                        return (
-                          <td
-                            key={date}
-                            style={{ 
-                              border: '1px solid #000', 
-                              padding: '6px 4px',   
-                              textAlign: 'center',
-                              backgroundColor: isCurrentMonth && date === today ? '#e3f2fd' : 'inherit'
-                            }}
-                          >
-                            {esoText}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  );
-                }
-
-                if (cp.type === "weekly" && cp.id === 14) {
-                  return (
-                    <React.Fragment key={`cp-${cp.id}`}>
-                      <tr key={`${cp.id}-header`}>
-                        {isFirstOfGroup && <td rowSpan={3} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>{cp.no}</td>}
-                        <td rowSpan={3} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'left' }}>{cp.checkPoint}</td>
+                  if (cp.type === "special") {
+                    return (
+                      <tr key={`cp-${cp.id}`}>
                         <td style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}></td>
-                        <td style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}></td>
-                        {isFirstOfGroup && <td rowSpan={3} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>{cp.standard}</td>}
+                        <td colSpan={3} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'left' }}>{cp.checkPoint}</td>
+                        <td style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>{cp.standard}</td>
                         {dynamicDates.map((date) => {
-                          const weeklyText = renderWeeklyAssignment(date);
+                          const esoText = renderESOCell(date, "A");
                           return (
-                            <td key={date} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>
-                              {weeklyText}
+                            <td
+                              key={date}
+                              style={{ 
+                                border: '1px solid #000', 
+                                padding: '6px 4px',   
+                                textAlign: 'center',
+                                backgroundColor: isCurrentMonth && date === today ? '#e3f2fd' : 'inherit'
+                              }}
+                            >
+                              {esoText}
                             </td>
                           );
                         })}
                       </tr>
-                      <tr key={`${cp.id}-A`}>
-                        <td style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>A</td>
-                        <td style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>{cp.shifts[0].waktuCheck}</td>
-                        {dynamicDates.map((date) => (
-                          <td
-                            key={date}
-                            style={{ 
-                              border: '1px solid #000', 
-                              padding: '6px 4px',   
-                              textAlign: 'center',
-                              backgroundColor: isCurrentMonth && date === today ? '#e3f2fd' : 'inherit'
-                            }}
-                          >
-                            {renderStatusCell(date, cp, "A")}
-                          </td>
-                        ))}
-                      </tr>
-                      <tr key={`${cp.id}-B`}>
-                        <td style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>B</td>
-                        <td style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>{cp.shifts[1].waktuCheck}</td>
-                        {dynamicDates.map((date) => (
-                          <td
-                            key={date}
-                            style={{ 
-                              border: '1px solid #000', 
-                              padding: '6px 4px',   
-                              textAlign: 'center',
-                              backgroundColor: isCurrentMonth && date === today ? '#e3f2fd' : 'inherit'
-                            }}
-                          >
-                            {renderStatusCell(date, cp, "B")}
-                          </td>
-                        ))}
-                      </tr>
-                    </React.Fragment>
-                  );
-                }
+                    );
+                  }
 
-                return (
-                  <React.Fragment key={`cp-${cp.id}`}>
-                    {cp.shifts.map((shiftData, shiftIdx) => {
-                      if (shiftData.waktuCheck === " ") return null;
-                      return (
-                        <tr key={`${cp.id}-${shiftIdx}`}>
-                          {shiftIdx === 0 && isFirstOfGroup && (
-                            <td rowSpan={groupRowSpan} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>{cp.no}</td>
-                          )}
-                          {shiftIdx === 0 && (
-                            <td
-                              rowSpan={cp.shifts.filter(s => s.waktuCheck !== " ").length}
-                              style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'left' }}
-                            >
-                              {cp.checkPoint}
-                            </td>
-                          )}
-                          <td style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>{shiftData.shift}</td>
-                          <td style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>{shiftData.waktuCheck}</td>
-                          {shiftIdx === 0 && isFirstOfGroup && (
-                            <td rowSpan={groupRowSpan} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>{cp.standard}</td>
-                          )}
+                  if (cp.type === "weekly" && cp.id === 14) {
+                    return (
+                      <React.Fragment key={`cp-${cp.id}`}>
+                        <tr key={`${cp.id}-header`}>
+                          {isFirstOfGroup && <td rowSpan={3} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>{cp.no}</td>}
+                          <td rowSpan={3} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'left' }}>{cp.checkPoint}</td>
+                          <td style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}></td>
+                          <td style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}></td>
+                          {isFirstOfGroup && <td rowSpan={3} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>{cp.standard}</td>}
+                          {dynamicDates.map((date) => {
+                            const weeklyText = renderWeeklyAssignment(date);
+                            return (
+                              <td key={date} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>
+                                {weeklyText}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                        <tr key={`${cp.id}-A`}>
+                          <td style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>A</td>
+                          <td style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>{cp.shifts[0].waktuCheck}</td>
                           {dynamicDates.map((date) => (
                             <td
                               key={date}
                               style={{ 
                                 border: '1px solid #000', 
-                                padding: '6px 4px', 
+                                padding: '6px 4px',   
                                 textAlign: 'center',
                                 backgroundColor: isCurrentMonth && date === today ? '#e3f2fd' : 'inherit'
                               }}
                             >
-                              {renderStatusCell(date, cp, shiftData.shift)}
+                              {renderStatusCell(date, cp, "A")}
                             </td>
                           ))}
                         </tr>
-                      );
-                    })}
-                  </React.Fragment>
-                );
-              })}
-              <tr>
-                <td style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}></td>
-                <td colSpan={4} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>Tanda tangan GL Inspector</td>
-                {dynamicDates.map((date) => {
-                  const signatureStatus = getGLSignature(date, "A", "group-leader");
-                  const getBgColor = (status: string) => {
-                    if (status === "OK") return "#4caf50";
-                    if (status === "NG") return "#f44336";
-                    return "#9e9e9e";
-                  };
+                        <tr key={`${cp.id}-B`}>
+                          <td style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>B</td>
+                          <td style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>{cp.shifts[1].waktuCheck}</td>
+                          {dynamicDates.map((date) => (
+                            <td
+                              key={date}
+                              style={{ 
+                                border: '1px solid #000', 
+                                padding: '6px 4px',   
+                                textAlign: 'center',
+                                backgroundColor: isCurrentMonth && date === today ? '#e3f2fd' : 'inherit'
+                              }}
+                            >
+                              {renderStatusCell(date, cp, "B")}
+                            </td>
+                          ))}
+                        </tr>
+                      </React.Fragment>
+                    );
+                  }
+
                   return (
-                    <td key={date} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>
-                      <select
-                        style={{ 
-                          backgroundColor: getBgColor(signatureStatus), 
-                          color: "white",
-                          width: '100%',
-                          border: 'none',
-                          padding: '4px 8px',
-                          borderRadius: '4px',
-                          fontWeight: 'bold'
-                        }}
-                        value={signatureStatus}
-                        onChange={(e) => handleGLSignatureChange(date, "A", e.target.value as "-" | "OK", "group-leader")}
-                      >
-                        <option value="-">-</option>
-                        <option value="OK">✓ OK</option>
-                      </select>
-                    </td>
+                    <React.Fragment key={`cp-${cp.id}`}>
+                      {cp.shifts.map((shiftData, shiftIdx) => {
+                        if (shiftData.waktuCheck === " ") return null;
+                        return (
+                          <tr key={`${cp.id}-${shiftIdx}`}>
+                            {shiftIdx === 0 && isFirstOfGroup && (
+                              <td rowSpan={groupRowSpan} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>{cp.no}</td>
+                            )}
+                            {shiftIdx === 0 && (
+                              <td
+                                rowSpan={cp.shifts.filter(s => s.waktuCheck !== " ").length}
+                                style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'left' }}
+                              >
+                                {cp.checkPoint}
+                              </td>
+                            )}
+                            <td style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>{shiftData.shift}</td>
+                            <td style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>{shiftData.waktuCheck}</td>
+                            {shiftIdx === 0 && isFirstOfGroup && (
+                              <td rowSpan={groupRowSpan} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>{cp.standard}</td>
+                            )}
+                            {dynamicDates.map((date) => (
+                              <td
+                                key={date}
+                                style={{ 
+                                  border: '1px solid #000', 
+                                  padding: '6px 4px', 
+                                  textAlign: 'center',
+                                  backgroundColor: isCurrentMonth && date === today ? '#e3f2fd' : 'inherit'
+                                }}
+                              >
+                                {renderStatusCell(date, cp, shiftData.shift)}
+                              </td>
+                            ))}
+                          </tr>
+                        );
+                      })}
+                    </React.Fragment>
                   );
                 })}
-              </tr>
-            </tbody>
-          </table>
-        ) : showInspectorTable ? (
-          <table className="status-table">
-            <thead>
-              <tr>
-                <th rowSpan={2} className="col-no">NO</th>
-                <th rowSpan={2} className="col-item-check">ITEM CHECK</th>
-                <th rowSpan={2} className="col-checkpoint">CHECK POINT</th>
-                <th rowSpan={2} className="col-metode">METODE CHECK</th>
-                <th colSpan={5} className="col-area">AREA</th>
-                <th rowSpan={2} className="col-shift">SHIFT</th>
-                <th colSpan={dynamicDates.length} className="month-header">
-                  {getMonthName(activeMonth)} {activeYear}
-                </th>
-              </tr>
-              <tr>
-                <th className="col-wp-check">WP CHECK</th>
-                <th className="col-checker">CHECKER</th>
-                <th className="col-visual-1">VISUAL 1</th>
-                <th className="col-visual-2">VISUAL 2</th>
-                <th className="col-double-check">DOUBLE CHECK (RI)</th>
-                {dynamicDates.map((date) => (
-                  <th 
-                    key={date} 
-                    className={`col-date ${isCurrentMonth && date === today ? "col-date-today" : ""}`}
-                  >
-                    {date}
+                <tr>
+                  <td style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}></td>
+                  <td colSpan={4} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>Tanda tangan GL Inspector</td>
+                  {dynamicDates.map((date) => {
+                    const signatureStatus = getGLSignature(date, "A", "group-leader");
+                    const getBgColor = (status: string) => {
+                      if (status === "OK") return "#4caf50";
+                      if (status === "NG") return "#f44336";
+                      return "#9e9e9e";
+                    };
+                    return (
+                      <td key={date} style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center' }}>
+                        <select
+                          style={{ 
+                            backgroundColor: getBgColor(signatureStatus), 
+                            color: "white",
+                            width: '100%',
+                            border: 'none',
+                            padding: '4px 8px',
+                            borderRadius: '4px',
+                            fontWeight: 'bold'
+                          }}
+                          value={signatureStatus}
+                          onChange={(e) => handleGLSignatureChange(date, "A", e.target.value as "-" | "OK", "group-leader")}
+                        >
+                          <option value="-">-</option>
+                          <option value="OK">✓ OK</option>
+                        </select>
+                      </td>
+                    );
+                  })}
+                </tr>
+              </tbody>
+            </table>
+          ) : showInspectorTable ? (
+            <table className="status-table">
+              <thead>
+                <tr>
+                  <th rowSpan={2} className="col-no">NO</th>
+                  <th rowSpan={2} className="col-item-check">ITEM CHECK</th>
+                  <th rowSpan={2} className="col-checkpoint">CHECK POINT</th>
+                  <th rowSpan={2} className="col-metode">METODE CHECK</th>
+                  <th colSpan={5} className="col-area">AREA</th>
+                  <th rowSpan={2} className="col-shift">SHIFT</th>
+                  <th colSpan={dynamicDates.length} className="month-header">
+                    {getMonthName(activeMonth)} {activeYear}
                   </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {Object.entries(
-                inspectorCheckItems.reduce((groups, item) => {
-                  const group = groups[item.no] || []
-                  group.push(item)
-                  groups[item.no] = group
-                  return groups
-                }, {} as Record<string, InspectorCheckItem[]>)
-              ).map(([no, items]) => {
-                return items.map((item, itemIdx) => {
-                  let itemCheckCount = 1
-                  let nextIdx = itemIdx + 1
-                  while (nextIdx < items.length && items[nextIdx].itemCheck === item.itemCheck) {
-                    itemCheckCount++
-                    nextIdx++
-                  }
-
-                  let checkPointCount = 1
-                  let nextCheckIdx = itemIdx + 1
-                  while (nextCheckIdx < items.length && items[nextCheckIdx].checkPoint === item.checkPoint) {
-                    checkPointCount++
-                    nextCheckIdx++
-                  }
-
-                  const itemCheckRows = itemCheckCount * 2
-                  const checkPointRows = checkPointCount * 2
-
-                  return (
-                    <React.Fragment key={`item-${item.id}`}>
-                      <tr>
-                        {itemIdx === 0 && (
-                          <td 
-                            className="col-no" 
-                            rowSpan={items.length * 2}
-                          >
-                            {no}
-                          </td>
-                        )}
-
-                        {(itemIdx === 0 || items[itemIdx - 1].itemCheck !== item.itemCheck) && (
-                          <td 
-                            className="col-item-check" 
-                            rowSpan={itemCheckRows}
-                          >
-                            {item.itemCheck}
-                          </td>
-                        )}
-
-                        {(itemIdx === 0 || items[itemIdx - 1].checkPoint !== item.checkPoint) && (
-                          <td 
-                            className="col-checkpoint" 
-                            rowSpan={checkPointRows}
-                          >
-                            {item.checkPoint}
-                          </td>
-                        )}
-
-                        <td className="col-metode" rowSpan={2}>
-                          {item.metodeCheck}
-                        </td>
-
-                        {(itemIdx === 0 || items[itemIdx - 1].itemCheck !== item.itemCheck) && (
-                          <>
-                            <td className="col-wp-check" rowSpan={itemCheckRows}>
-                              {shouldShowIcon(item, "wp-check") ? "O" : " "}
-                            </td>
-                            <td className="col-checker" rowSpan={itemCheckRows}>
-                              {shouldShowIcon(item, "checker") ? "O" : " "}
-                            </td>
-                            <td className="col-visual-1" rowSpan={itemCheckRows}>
-                              {shouldShowIcon(item, "visual-1") ? "O" : " "}
-                            </td>
-                            <td className="col-visual-2" rowSpan={itemCheckRows}>
-                              {shouldShowIcon(item, "visual-2") ? "O" : " "}
-                            </td>
-                            <td className="col-double-check" rowSpan={itemCheckRows}>
-                              {shouldShowIcon(item, "double-check") ? "O" : " "}
-                            </td>
-                          </>
-                        )}
-
-                        <td className="col-shift">A</td>
-
-                        {dynamicDates.map((date) => (
-                          <td
-                            key={date}
-                            className={`col-date ${
-                              isCurrentMonth && date === today ? "bg-blue-50" : ""
-                            } ${!isCheckDate(item, "A", date) ? "bg-gray-200" : ""}`}
-                          >
-                            {renderInspectorStatusCell(date, item.id, "A")}
-                          </td>
-                        ))}
-                      </tr>
-
-                      <tr>
-                        <td className="col-shift">B</td>
-
-                        {dynamicDates.map((date) => (
-                          <td
-                            key={date}
-                            className={`col-date ${
-                              isCurrentMonth && date === today ? "bg-blue-50" : ""
-                            } ${!isCheckDate(item, "B", date) ? "bg-gray-200" : ""}`}
-                          >
-                            {renderInspectorStatusCell(date, item.id, "B")}
-                          </td>
-                        ))}
-                      </tr>
-                    </React.Fragment>
-                  )
-                })
-              })}
-
-              <tr>
-                <td style={{ border: "none" }} rowSpan={2} colSpan={5}></td>
-                <td rowSpan={2} colSpan={4} className="col-wp-check">
-                  SIGN / CHECK OLEH GL INSPECTOR
-                </td>
-                <td className="col-shift">A</td>
-                {dynamicDates.map((date) => {
-                  const signatureStatus = getGLSignature(date, "A", "inspector");
-                  const getBgColor = (status: string) => {
-                    if (status === "OK") return "#4caf50";
-                    return "#9e9e9e";
-                  };
-                  return (
-                    <td 
+                </tr>
+                <tr>
+                  <th className="col-wp-check">WP CHECK</th>
+                  <th className="col-checker">CHECKER</th>
+                  <th className="col-visual-1">VISUAL 1</th>
+                  <th className="col-visual-2">VISUAL 2</th>
+                  <th className="col-double-check">DOUBLE CHECK (RI)</th>
+                  {dynamicDates.map((date) => (
+                    <th 
                       key={date} 
-                      className={`col-date ${isCurrentMonth && date === today ? "bg-blue-50" : ""}`}
+                      className={`col-date ${isCurrentMonth && date === today ? "col-date-today" : ""}`}
                     >
-                      <select
-                        className="status-dropdown"
-                        style={{ backgroundColor: getBgColor(signatureStatus), color: "white" }}
-                        value={signatureStatus}
-                        disabled={!hasPermission.canEditSignature}
-                        onChange={(e) =>
-                          handleGLSignatureChange(
+                      {date}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(
+                  inspectorCheckItems.reduce((groups, item) => {
+                    const group = groups[item.no] || []
+                    group.push(item)
+                    groups[item.no] = group
+                    return groups
+                  }, {} as Record<string, InspectorCheckItem[]>)
+                ).map(([no, items]) => {
+                  return items.map((item, itemIdx) => {
+                    let itemCheckCount = 1
+                    let nextIdx = itemIdx + 1
+                    while (nextIdx < items.length && items[nextIdx].itemCheck === item.itemCheck) {
+                      itemCheckCount++
+                      nextIdx++
+                    }
+
+                    let checkPointCount = 1
+                    let nextCheckIdx = itemIdx + 1
+                    while (nextCheckIdx < items.length && items[nextCheckIdx].checkPoint === item.checkPoint) {
+                      checkPointCount++
+                      nextCheckIdx++
+                    }
+
+                    const itemCheckRows = itemCheckCount * 2
+                    const checkPointRows = checkPointCount * 2
+
+                    return (
+                      <React.Fragment key={`item-${item.id}`}>
+                        <tr>
+                          {itemIdx === 0 && (
+                            <td 
+                              className="col-no" 
+                              rowSpan={items.length * 2}
+                            >
+                              {no}
+                            </td>
+                          )}
+
+                          {(itemIdx === 0 || items[itemIdx - 1].itemCheck !== item.itemCheck) && (
+                            <td 
+                              className="col-item-check" 
+                              rowSpan={itemCheckRows}
+                            >
+                              {item.itemCheck}
+                            </td>
+                          )}
+
+                          {(itemIdx === 0 || items[itemIdx - 1].checkPoint !== item.checkPoint) && (
+                            <td 
+                              className="col-checkpoint" 
+                              rowSpan={checkPointRows}
+                            >
+                              {item.checkPoint}
+                            </td>
+                          )}
+
+                          <td className="col-metode" rowSpan={2}>
+                            {item.metodeCheck}
+                          </td>
+
+                          {(itemIdx === 0 || items[itemIdx - 1].itemCheck !== item.itemCheck) && (
+                            <>
+                              <td className="col-wp-check" rowSpan={itemCheckRows}>
+                                {shouldShowIcon(item, "wp-check") ? "O" : " "}
+                              </td>
+                              <td className="col-checker" rowSpan={itemCheckRows}>
+                                {shouldShowIcon(item, "checker") ? "O" : " "}
+                              </td>
+                              <td className="col-visual-1" rowSpan={itemCheckRows}>
+                                {shouldShowIcon(item, "visual-1") ? "O" : " "}
+                              </td>
+                              <td className="col-visual-2" rowSpan={itemCheckRows}>
+                                {shouldShowIcon(item, "visual-2") ? "O" : " "}
+                              </td>
+                              <td className="col-double-check" rowSpan={itemCheckRows}>
+                                {shouldShowIcon(item, "double-check") ? "O" : " "}
+                              </td>
+                            </>
+                          )}
+
+                          <td className="col-shift">A</td>
+
+                          {dynamicDates.map((date) => (
+                            <td
+                              key={date}
+                              className={`col-date ${
+                                isCurrentMonth && date === today ? "bg-blue-50" : ""
+                              } ${!isCheckDate(item, "A", date) ? "bg-gray-200" : ""}`}
+                            >
+                              {renderInspectorStatusCell(date, item.id, "A")}
+                            </td>
+                          ))}
+                        </tr>
+
+                        <tr>
+                          <td className="col-shift">B</td>
+
+                          {dynamicDates.map((date) => (
+                            <td
+                              key={date}
+                              className={`col-date ${
+                                isCurrentMonth && date === today ? "bg-blue-50" : ""
+                              } ${!isCheckDate(item, "B", date) ? "bg-gray-200" : ""}`}
+                            >
+                              {renderInspectorStatusCell(date, item.id, "B")}
+                            </td>
+                          ))}
+                        </tr>
+                      </React.Fragment>
+                    )
+                  })
+                })}
+
+                <tr>
+                  <td style={{ border: "none" }} rowSpan={2} colSpan={5}></td>
+                  <td rowSpan={2} colSpan={4} className="col-wp-check">
+                    SIGN / CHECK OLEH GL INSPECTOR
+                  </td>
+                  <td className="col-shift">A</td>
+                  {dynamicDates.map((date) => {
+                    const signatureStatus = getGLSignature(date, "A", "inspector");
+                    const getBgColor = (status: string) => {
+                      if (status === "OK") return "#4caf50";
+                      return "#9e9e9e";
+                    };
+                    return (
+                      <td 
+                        key={date} 
+                        className={`col-date ${isCurrentMonth && date === today ? "bg-blue-50" : ""}`}
+                      >
+                        <select
+                          className="status-dropdown"
+                          style={{ backgroundColor: getBgColor(signatureStatus), color: "white" }}
+                          value={signatureStatus}
+                          disabled={!hasPermission.canEditSignature}
+                          onChange={(e) =>
+                            handleGLSignatureChange(
+                              date,
+                              "A",
+                              e.target.value as "-" | "OK",
+                              "inspector"
+                            )
+                          }
+                        >
+                          <option value="-">-</option>
+                          <option value="OK">✓ OK</option>
+                        </select>
+                      </td>
+                    )
+                  })}
+                </tr>
+                <tr>
+                  <td className="col-shift">B</td>
+                  {dynamicDates.map((date) => {
+                    const signatureStatus = getGLSignature(date, "B", "inspector");
+                    const getBgColor = (status: string) => {
+                      if (status === "OK") return "#4caf50";
+                      if (status === "NG") return "#f44336";
+                      return "#9e9e9e";
+                    };
+                    return (
+                      <td 
+                        key={date} 
+                        className={`col-date ${isCurrentMonth && date === today ? "bg-blue-50" : ""}`}
+                      >
+                        <select
+                          className="status-dropdown"
+                          style={{ backgroundColor: getBgColor(signatureStatus), color: "white" }}
+                          value={signatureStatus}
+                          disabled={!hasPermission.canEditSignature}
+                          onChange={(e) => handleGLSignatureChange(
                             date,
-                            "A",
+                            "B",  // ✅ Gunakan "B" untuk shift B
                             e.target.value as "-" | "OK",
                             "inspector"
-                          )
-                        }
-                      >
-                        <option value="-">-</option>
-                        <option value="OK">✓ OK</option>
-                      </select>
-                    </td>
-                  )
-                })}
-              </tr>
-              <tr>
-                <td className="col-shift">B</td>
-                {dynamicDates.map((date) => {
-                  const signatureStatus = getGLSignature(date, "B", "inspector");
-                  const getBgColor = (status: string) => {
-                    if (status === "OK") return "#4caf50";
-                    if (status === "NG") return "#f44336";
-                    return "#9e9e9e";
-                  };
-                  return (
-                    <td 
-                      key={date} 
-                      className={`col-date ${isCurrentMonth && date === today ? "bg-blue-50" : ""}`}
-                    >
-                      <select
-                        className="status-dropdown"
-                        style={{ backgroundColor: getBgColor(signatureStatus), color: "white" }}
-                        value={signatureStatus}
-                        disabled={!hasPermission.canEditSignature}
-                        onChange={(e) => handleGLSignatureChange(
-                          date,
-                          "B",  // ✅ Gunakan "B" untuk shift B
-                          e.target.value as "-" | "OK",
-                          "inspector"
-                        )}
-                      >
-                        <option value="-">-</option>
-                        <option value="OK">✓ OK</option>
-                      </select> 
-                    </td>
-                  )
-                })}
-              </tr>
-            </tbody>
-          </table>
-        ) : null}
+                          )}
+                        >
+                          <option value="-">-</option>
+                          <option value="OK">✓ OK</option>
+                        </select> 
+                      </td>
+                    )
+                  })}
+                </tr>
+              </tbody>
+            </table>
+          ) : null}
+        </div>
       </div>
 
       {/* MODALS */}
@@ -2305,6 +2261,394 @@ export default function FinalAssyStatusPage() {
           background-color: #e3f2fd;
           font-weight: bold;
           font-size: 1rem;
+        }
+
+        /* RESPONSIVE IMPROVEMENTS */
+        @media (max-width: 1024px) {
+          .status-table {
+            font-size: 0.65rem;
+          }
+          
+          .status-table th,
+          .status-table td {
+            padding: 3px 5px;
+          }
+
+          .col-no { min-width: 28px; }
+          .col-item-check { min-width: 100px; }
+          .col-checkpoint { min-width: 150px; }
+          .col-metode { min-width: 60px; }
+          .col-area { min-width: 50px; }
+          .col-shift { min-width: 35px; }
+          .col-date { min-width: 32px; }
+          .col-wp-check,
+          .col-checker,
+          .col-visual-1,
+          .col-visual-2,
+          .col-double-check {
+            min-width: 45px;
+          }
+        }
+
+        @media (max-width: 768px) {
+          .status-table {
+            font-size: 0.6rem;
+          }
+          
+          .status-table th,
+          .status-table td {
+            padding: 2px 4px;
+            border: 0.5px solid #999;
+          }
+
+          .col-no { min-width: 25px; }
+          .col-item-check { min-width: 80px; }
+          .col-checkpoint { min-width: 100px; }
+          .col-metode { min-width: 50px; }
+          .col-area { min-width: 45px; }
+          .col-shift { min-width: 30px; }
+          .col-date { min-width: 28px; }
+          .col-wp-check,
+          .col-checker,
+          .col-visual-1,
+          .col-visual-2,
+          .col-double-check {
+            min-width: 38px;
+          }
+
+          .month-header {
+            font-size: 0.9rem;
+            padding: 5px 0;
+          }
+
+          .status-dropdown {
+            font-size: 0.6rem;
+            padding: 1px 2px;
+          }
+        }
+
+        @media (max-width: 600px) {
+
+          .header h1 {
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: white;
+            margin: 0;
+            line-height: 1.1;
+          }
+
+          .dropdown-group {
+            width: 100%;
+          }
+
+          .dropdown-group select {
+            width: 100%;
+            padding: 5px 7px;
+            font-size: 0.7rem;
+            border-radius: 3px;
+            border: 1px solid #cbd5e1;
+            min-height: 28px;
+            background: white;
+          }
+
+          .month-nav {
+            display: flex;
+            gap: 3px;
+            justify-content: center;
+            align-items: center;
+            padding: 4px;
+            background: white;
+            border-radius: 3px;
+            margin-bottom: 6px;
+            flex-wrap: wrap;
+            border: 1px solid #e2e8f0;
+          }
+
+          .month-btn {
+            padding: 4px 6px;
+            font-size: 0.6rem;
+            background: #1976d2;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            font-weight: 600;
+            min-height: 26px;
+            cursor: pointer;
+          }
+
+          .month-display {
+            font-size: 0.7rem;
+            font-weight: 700;
+            color: #0f172a;
+            min-width: 75px;
+            text-align: center;
+            line-height: 1.1;
+          }
+
+          .status-table {
+            font-size: 0.55rem;
+            border-collapse: collapse;
+            width: 100%;
+            line-height: 1.1;
+          }
+          
+          .status-table th,
+          .status-table td {
+            padding: 0.5px 0.3px;
+            border: 0.5px solid #cbd5e1;
+            text-align: center;
+            font-size: 0.55rem;
+            height: auto;
+          }
+
+          .status-table th {
+            background: #f1f5f9;
+            font-weight: 600;
+            padding: 1px 0.3px;
+            color: #334155;
+          }
+
+          .col-no { min-width: 22px; }
+          .col-item-check { min-width: 75px; }
+          .col-checkpoint { min-width: 90px; }
+          .col-metode { min-width: 45px; }
+          .col-area { min-width: 40px; }
+          .col-shift { min-width: 26px; }
+          .col-date { min-width: 24px; }
+          .col-wp-check,
+          .col-checker,
+          .col-visual-1,
+          .col-visual-2,
+          .col-double-check {
+            min-width: 32px;
+          }
+
+          .month-header {
+            font-size: 0.8rem;
+            padding: 3px 0;
+            font-weight: 700;
+            background: #eff6ff;
+            color: #1e40af;
+            height: auto;
+          }
+
+          .status-dropdown {
+            font-size: 0.68rem;
+            padding: 1px 1px;
+            line-height: 1.1;
+            border-radius: 3px;
+            border: 0.5px solid #cbd5e1;
+          }
+
+          .bg-blue-50 {
+            background-color: #eff6ff !important;
+          }
+
+          .col-date-today {
+            background-color: #fef3c7 !important;
+            color: #92400e !important;
+            font-weight: bold !important;
+          }
+        }
+
+        @media (max-width: 480px) {
+          .header h1 {
+            font-size: 0.7rem;
+            line-height: 1;
+            text-align: center;
+          }
+
+          .month-nav {
+            gap: 3px;
+            padding: 4px;
+            margin-bottom: 6px;
+          }
+
+          .month-btn {
+            padding: 3px 5px;
+            font-size: 0.55rem;
+            min-height: 24px;
+          }
+
+          .month-display {
+            font-size: 0.65rem;
+            min-width: 70px;
+            line-height: 1;
+          }
+
+          .dropdown-group select {
+            padding: 4px 7px;
+            font-size: 0.65rem;
+            min-height: 28px;
+            border: 1px solid #cbd5e1;
+          }
+
+          .status-table {
+            font-size: 0.52rem;
+            line-height: 1.05;
+          }
+          
+          .status-table th,
+          .status-table td {
+            padding: 0.5px 0.3px;
+            font-size: 0.52rem;
+            border: 0.5px solid #cbd5e1;
+            height: auto;
+          }
+
+          .status-table th {
+            padding: 1px 0.3px;
+            font-size: 0.52rem;
+            background: #f1f5f9;
+            color: #334155;
+            font-weight: 600;
+          }
+
+          .header h1 {
+            font-size: 0.95rem;
+          }
+
+          .month-nav {
+            gap: 5px;
+            padding: 8px;
+            margin-bottom: 12px;
+          }
+
+          .month-btn {
+            padding: 6px 10px;
+            font-size: 0.7rem;
+            min-height: 30px;
+          }
+
+          .month-display {
+            font-size: 0.85rem;
+            min-width: 90px;
+          }
+
+          .dropdown-group select {
+            padding: 8px 10px;
+            font-size: 0.8rem;
+            min-height: 36px;
+            border: 1px solid #cbd5e1;
+          }
+
+          .status-table {
+            font-size: 0.66rem;
+            line-height: 1.2;
+          }
+          
+          .status-table th,
+          .status-table td {
+            padding: 2px 1px;
+            font-size: 0.66rem;
+            border: 0.5px solid #cbd5e1;
+            height: auto;
+          }
+
+          .status-table th {
+            padding: 3px 1px;
+            font-size: 0.66rem;
+            background: #f1f5f9;
+            color: #334155;
+            font-weight: 600;
+          }
+
+          .col-no { min-width: 21px; }
+          .col-item-check { min-width: 70px; }
+          .col-checkpoint { min-width: 78px; }
+          .col-metode { min-width: 40px; }
+          .col-area { min-width: 38px; }
+          .col-shift { min-width: 23px; }
+          .col-date { min-width: 22px; }
+          .col-wp-check,
+          .col-checker,
+          .col-visual-1,
+          .col-visual-2,
+          .col-double-check {
+            min-width: 30px;
+          }
+
+          .month-header {
+            font-size: 0.78rem;
+            padding: 2px 0;
+            background: #eff6ff;
+            color: #1e40af;
+            font-weight: 700;
+            height: auto;
+          }
+
+          .status-dropdown {
+            font-size: 0.66rem;
+            padding: 1px 1px;
+            line-height: 1.1;
+            border: 0.5px solid #cbd5e1;
+          }
+        }
+
+        @media (max-width: 414px) {
+          .header h1 {
+            font-size: 13px;
+          }
+
+          .month-nav {
+            gap: 4px;
+            padding: 8px;
+            margin-bottom: 12px;
+          }
+
+          .month-btn {
+            padding: 6px 10px;
+            font-size: 0.7rem;
+            min-height: 32px;
+          }
+
+          .month-display {
+            font-size: 0.9rem;
+            min-width: 90px;
+          }
+
+          .dropdown-group select {
+            padding: 8px 8px;
+            font-size: 0.75rem;
+            min-height: 36px;
+          }
+
+          .status-table {
+            font-size: 0.55rem;
+          }
+          
+          .status-table th,
+          .status-table td {
+            padding: 2px 1px;
+            font-size: 0.55rem;
+            border: 0.5px solid #ccc;
+          }
+
+          .col-no { min-width: 22px; }
+          .col-item-check { min-width: 70px; }
+          .col-checkpoint { min-width: 80px; }
+          .col-metode { min-width: 40px; }
+          .col-area { min-width: 38px; }
+          .col-shift { min-width: 24px; }
+          .col-date { min-width: 22px; }
+          .col-wp-check,
+          .col-checker,
+          .col-visual-1,
+          .col-visual-2,
+          .col-double-check {
+            min-width: 30px;
+          }
+
+          .month-header {
+            font-size: 0.75rem;
+            padding: 4px 0;
+          }
+
+          .status-dropdown {
+            font-size: 0.55rem;
+            padding: 1px 1px;
+            line-height: 1;
+          }
         }
       `}</style>
     </>

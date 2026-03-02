@@ -1,5 +1,8 @@
 ├── app
 │   ├── api
+│   │   ├── areas
+│   │   │   ├── get-by-category
+│   │   │   │   ├── route.ts
 │   │   ├── auth
 │   │   │   ├── login
 │   │   │   │   ├── route.ts
@@ -20,6 +23,23 @@
 │   │   │   ├── save-result
 │   │   │   │   ├── route.ts
 │   │   │   ├── save-signature
+│   │   │   │   ├── route.ts
+│   │   ├── gauges
+│   │   │   ├── checkpoints
+│   │   │   │   ├── get
+│   │   │   │   │   ├── route.ts
+│   │   │   │   ├── save
+│   │   │   │   │   ├── route.ts
+│   │   │   │   ├── route.ts
+│   │   │   ├── get-by-code
+│   │   │   │   ├── route.ts
+│   │   │   ├── get-by-gauge-id
+│   │   │   │   ├── route.ts
+│   │   │   ├── get-inspection
+│   │   │   │   ├── route.ts
+│   │   │   ├── save-inspection
+│   │   │   │   ├── route.ts
+│   │   │   ├── scanned-history
 │   │   │   │   ├── route.ts
 │   │   ├── pre-assy
 │   │   │   ├── get-results
@@ -73,16 +93,24 @@
 ├── components
 │   ├── ui
 │   │   ├── detailmodal.tsx
+│   ├── AreaFilter.tsx
 │   ├── chat-component.tsx
+│   ├── GaugeScanModal.tsx
 │   ├── navbar-fixed.tsx
 │   ├── navbar-static.tsx
+│   ├── ScanGaugeButton.tsx
 │   ├── Sidebar.tsx
 │   ├── Sidebar.txt
 │   ├── theme-provider.tsx
 ├── hooks
 │   ├── use-mobile.ts
 │   ├── use-toast.ts
+├── image
+│   ├── push-gauge-01.png
+│   ├── push-gauge-02.png
 ├── lib
+│   ├── types
+│   │   ├── gauge.ts
 │   ├── auth-context.tsx
 │   ├── auth.ts
 │   ├── db-helpers.ts
@@ -110,9 +138,11 @@
 ├── components.json
 ├── daftar-kode.txt
 ├── eslint.config.mjs
+├── items_faGL.txt
+├── items-remove-tool.txt
 ├── next-env.d.ts
 ├── next.config.mjs
-├── next.config.ts
+├── nextconfig_backup.ts
 ├── package-lock.json
 ├── package.json
 ├── pnpm-lock.yaml

@@ -819,8 +819,6 @@ export async function GET(request: NextRequest) {
 }
 
 // app/api/final-assy/get-signatures/route.ts
-// ✅ FIXED: Parameter indexing manual yang konsisten dengan query
-
 import { NextRequest, NextResponse } from 'next/server';
 import pool from '@/lib/db';
 
@@ -841,6 +839,7 @@ interface Signature {
   date_key: string;
   shift: string;
   signature_status: string;
+  area_id: number | null;
 }
 
 export async function GET(request: NextRequest) {
@@ -876,116 +875,65 @@ export async function GET(request: NextRequest) {
     const categoryId = categories.rows[0].id;
 
     // =========================================================
-    // 🔹 BUILD QUERY DENGAN PARAMETER INDEX MANUAL
+    // 🔹 BUILD QUERY - Filter signature berdasarkan area_id
     // =========================================================
-    
     let query = '';
     let queryParams: any[] = [];
 
+    // ✅ RESOLVE AREA_ID DARI AREA_CODE
+    let areaId: number | null = null;
+    if (areaCode) {
+      const areaResult = await pool.query(
+        `SELECT id FROM checklist_areas 
+         WHERE area_code = $1 AND category_id = $2 AND is_active = TRUE`,
+        [areaCode, categoryId]
+      );
+      if (areaResult.rows.length > 0) {
+        areaId = areaResult.rows[0].id;
+      }
+    }
+
     if (categoryCode === 'final-assy-inspector') {
       // === TABEL INSPECTOR ===
-      if (role === 'group-leader-qa') {
-        // Group-leader: lihat SEMUA signature inspector
-        if (areaCode) {
-          // ✅ Query dengan 4 parameter untuk filter area via EXISTS
-          query = `
-            SELECT s.date_key, s.shift, s.signature_status
-            FROM checklist_signatures s
-            WHERE s.category_id = $1 
-              AND s.date_key LIKE $2
-              AND EXISTS (
-                SELECT 1 FROM checklist_results cr
-                INNER JOIN checklist_items ci ON cr.item_id = ci.id
-                WHERE cr.user_id = s.user_id
-                  AND cr.category_id = s.category_id
-                  AND cr.date_key = s.date_key
-                  AND cr.shift = s.shift
-                  AND ci.area_id = (
-                    SELECT id FROM checklist_areas 
-                    WHERE area_code = $3::varchar AND category_id = $4::integer
-                  )
-              )
-            ORDER BY s.date_key, s.shift
-          `;
-          queryParams = [categoryId, `${month}%`, areaCode, categoryId];
-        } else {
-          // ✅ Query dengan 2 parameter
-          query = `
-            SELECT s.date_key, s.shift, s.signature_status
-            FROM checklist_signatures s
-            WHERE s.category_id = $1 
-              AND s.date_key LIKE $2
-            ORDER BY s.date_key, s.shift
-          `;
-          queryParams = [categoryId, `${month}%`];
-        }
-      } else {
-        // Inspector: hanya signature sendiri
-        if (areaCode) {
-          // ✅ Query dengan 5 parameter
-          query = `
-            SELECT s.date_key, s.shift, s.signature_status
-            FROM checklist_signatures s
-            WHERE s.user_id = $1 
-              AND s.category_id = $2 
-              AND s.date_key LIKE $3
-              AND EXISTS (
-                SELECT 1 FROM checklist_results cr
-                INNER JOIN checklist_items ci ON cr.item_id = ci.id
-                WHERE cr.user_id = s.user_id
-                  AND cr.category_id = s.category_id
-                  AND cr.date_key = s.date_key
-                  AND cr.shift = s.shift
-                  AND ci.area_id = (
-                    SELECT id FROM checklist_areas 
-                    WHERE area_code = $4::varchar AND category_id = $5::integer
-                  )
-              )
-            ORDER BY s.date_key, s.shift
-          `;
-          queryParams = [userId, categoryId, `${month}%`, areaCode, categoryId];
-        } else {
-          // ✅ Query dengan 3 parameter
-          query = `
-            SELECT s.date_key, s.shift, s.signature_status
-            FROM checklist_signatures s
-            WHERE s.user_id = $1 
-              AND s.category_id = $2 
-              AND s.date_key LIKE $3
-            ORDER BY s.date_key, s.shift
-          `;
-          queryParams = [userId, categoryId, `${month}%`];
-        }
-      }
-    } else {
-      // === TABEL GROUP LEADER ===
-      if (areaCode) {
-        // ✅ Query dengan 5 parameter
+      if (areaId !== null) {
         query = `
-          SELECT s.date_key, s.shift, s.signature_status
+          SELECT s.date_key, s.shift, s.signature_status, s.area_id
           FROM checklist_signatures s
           WHERE s.user_id = $1 
             AND s.category_id = $2 
             AND s.date_key LIKE $3
-            AND EXISTS (
-              SELECT 1 FROM checklist_results cr
-              INNER JOIN checklist_items ci ON cr.item_id = ci.id
-              WHERE cr.user_id = s.user_id
-                AND cr.category_id = s.category_id
-                AND cr.date_key = s.date_key
-                AND cr.shift = s.shift
-                AND ci.area_id = (
-                  SELECT id FROM checklist_areas 
-                  WHERE area_code = $4::varchar AND category_id = $5::integer
-                )
-            )
+            AND (s.area_id = $4 OR s.area_id IS NULL)
           ORDER BY s.date_key, s.shift
         `;
-        queryParams = [userId, categoryId, `${month}%`, areaCode, categoryId];
+        queryParams = [userId, categoryId, `${month}%`, areaId];
       } else {
-        // ✅ Query dengan 3 parameter
         query = `
-          SELECT s.date_key, s.shift, s.signature_status
+          SELECT s.date_key, s.shift, s.signature_status, s.area_id
+          FROM checklist_signatures s
+          WHERE s.user_id = $1 
+            AND s.category_id = $2 
+            AND s.date_key LIKE $3
+          ORDER BY s.date_key, s.shift
+        `;
+        queryParams = [userId, categoryId, `${month}%`];
+      }
+    } else {
+      // === TABEL GROUP LEADER ===
+      // ✅ FIX: Filter signature berdasarkan area_id (LANGSUNG, TANPA EXISTS)
+      if (areaId !== null) {
+        query = `
+          SELECT s.date_key, s.shift, s.signature_status, s.area_id
+          FROM checklist_signatures s
+          WHERE s.user_id = $1 
+            AND s.category_id = $2 
+            AND s.date_key LIKE $3
+            AND (s.area_id = $4 OR s.area_id IS NULL)
+          ORDER BY s.date_key, s.shift
+        `;
+        queryParams = [userId, categoryId, `${month}%`, areaId];
+      } else {
+        query = `
+          SELECT s.date_key, s.shift, s.signature_status, s.area_id
           FROM checklist_signatures s
           WHERE s.user_id = $1 
             AND s.category_id = $2 
@@ -996,7 +944,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Eksekusi query - parameter sekarang match!
+    // Eksekusi query
     const signatures = await pool.query<Signature>(query, queryParams);
 
     // Format response
@@ -1012,9 +960,9 @@ export async function GET(request: NextRequest) {
       count: signatures.rows.length,
       role,
       categoryCode,
-      areaCode: areaCode || null
+      areaCode: areaCode || null,
+      areaId
     });
-    
   } catch (error) {
     console.error('❌ Get signatures error:', error);
     return NextResponse.json({
@@ -1199,7 +1147,7 @@ export async function POST(request: NextRequest) {
 
 // app/api/final-assy/save-signature/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { executeQuery } from '@/lib/db-helpers';
+import pool from '@/lib/db';
 
 interface User {
   id: string;
@@ -1214,83 +1162,1160 @@ interface Category {
   id: number;
 }
 
-interface ExistingSignature {
-  id: number;
-}
-
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { userId, categoryCode, dateKey, shift, signatureStatus, tableType } = body;
+    const { userId, categoryCode, dateKey, shift, signatureStatus, tableType, areaCode } = body;
 
+    // Validasi required fields
     if (!userId || !categoryCode || !dateKey || !shift || !signatureStatus) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    // Validasi user
-    const users = await executeQuery<User>(
+    // =========================================================
+    // 🔹 VALIDASI USER
+    // =========================================================
+    const users = await pool.query<User>(
       'SELECT id, username, full_name, nik, department, role FROM users WHERE id = $1 AND is_active = TRUE',
       [userId]
     );
-    
-    if (users.length === 0) {
+
+    if (users.rows.length === 0) {
       return NextResponse.json({ error: 'Invalid user ID' }, { status: 403 });
     }
-    const nik = users[0].nik;
 
-    // Cari kategori di database
-    const categories = await executeQuery<Category>(
+    const nik = users.rows[0].nik;
+
+    // =========================================================
+    // 🔹 VALIDASI CATEGORY
+    // =========================================================
+    const categories = await pool.query<Category>(
       'SELECT id FROM checklist_categories WHERE category_code = $1',
       [categoryCode]
     );
-    
-    if (categories.length === 0) {
-      return NextResponse.json({ 
-        error: `Category "${categoryCode}" not found in database.` 
+
+    if (categories.rows.length === 0) {
+      return NextResponse.json({
+        error: `Category "${categoryCode}" not found in database.`
       }, { status: 404 });
     }
-    
-    const categoryId = categories[0].id;
 
-    // Cek existing signature
-    const existing = await executeQuery<ExistingSignature>(
-      `SELECT id FROM checklist_signatures 
-       WHERE user_id = $1 AND category_id = $2 AND date_key = $3 AND shift = $4`,
-      [userId, categoryId, dateKey, shift]
-    );
+    const categoryId = categories.rows[0].id;
 
-    if (existing.length > 0) {
-      // Update existing signature
-      await executeQuery(
-        `UPDATE checklist_signatures 
-         SET signature_status = $1, updated_at = CURRENT_TIMESTAMP
-         WHERE user_id = $2 AND category_id = $3 AND date_key = $4 AND shift = $5`,
-        [signatureStatus, userId, categoryId, dateKey, shift]
+    // =========================================================
+    // 🔹 RESOLVE AREA_ID DARI AREA_CODE (OPTIONAL)
+    // =========================================================
+    let areaId: number | null = null;
+    if (areaCode) {
+      const areaResult = await pool.query(
+        `SELECT id FROM checklist_areas 
+         WHERE area_code = $1 AND category_id = $2 AND is_active = TRUE`,
+        [areaCode, categoryId]
       );
-      return NextResponse.json({ 
-        success: true, 
-        message: 'Signature berhasil diupdate' 
-      });
-    } else {
-      // Insert new signature
-      await executeQuery(
-        `INSERT INTO checklist_signatures 
-         (user_id, nik, category_id, date_key, shift, signature_status)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [userId, nik, categoryId, dateKey, shift, signatureStatus]
-      );
-      return NextResponse.json({ 
-        success: true, 
-        message: 'Signature berhasil disimpan' 
+      if (areaResult.rows.length > 0) {
+        areaId = areaResult.rows[0].id;
+      }
+    }
+
+    // =========================================================
+    // 🔹 JIKA STATUS = "-", HAPUS DARI DATABASE
+    // =========================================================
+    if (signatureStatus === '-') {
+      if (areaId !== null) {
+        // Delete dengan filter area_id (match area_id yang sama atau NULL)
+        await pool.query(
+          `DELETE FROM checklist_signatures 
+           WHERE user_id = $1 
+             AND category_id = $2 
+             AND date_key = $3 
+             AND shift = $4 
+             AND (area_id = $5 OR area_id IS NULL)`,
+          [userId, categoryId, dateKey, shift, areaId]
+        );
+      } else {
+        // Delete tanpa filter area_id (hanya record dengan area_id NULL)
+        await pool.query(
+          `DELETE FROM checklist_signatures 
+           WHERE user_id = $1 
+             AND category_id = $2 
+             AND date_key = $3 
+             AND shift = $4 
+             AND area_id IS NULL`,
+          [userId, categoryId, dateKey, shift]
+        );
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: 'Signature berhasil dihapus',
+        deleted: true
       });
     }
+
+    // =========================================================
+    // 🔹 JIKA STATUS = "OK", SIMPAN/UPDATE KE DATABASE
+    // =========================================================
+    
+    // Cek existing signature dengan filter area_id yang konsisten
+    let existing;
+    if (areaId !== null) {
+      existing = await pool.query(
+        `SELECT id FROM checklist_signatures 
+         WHERE user_id = $1 
+           AND category_id = $2 
+           AND date_key = $3 
+           AND shift = $4 
+           AND (area_id = $5 OR area_id IS NULL)`,
+        [userId, categoryId, dateKey, shift, areaId]
+      );
+    } else {
+      existing = await pool.query(
+        `SELECT id FROM checklist_signatures 
+         WHERE user_id = $1 
+           AND category_id = $2 
+           AND date_key = $3 
+           AND shift = $4 
+           AND area_id IS NULL`,
+        [userId, categoryId, dateKey, shift]
+      );
+    }
+
+    if (existing.rows.length > 0) {
+      // ✅ UPDATE: Update existing signature dengan area_id
+      await pool.query(
+        `UPDATE checklist_signatures 
+         SET signature_status = $1, 
+             area_id = $2, 
+             updated_at = CURRENT_TIMESTAMP
+         WHERE user_id = $3 
+           AND category_id = $4 
+           AND date_key = $5 
+           AND shift = $6`,
+        [signatureStatus, areaId, userId, categoryId, dateKey, shift]
+      );
+
+      return NextResponse.json({
+        success: true,
+        message: 'Signature berhasil diupdate',
+        areaId,
+        action: 'updated'
+      });
+    } else {
+      // ✅ INSERT: Insert new signature dengan area_id
+      await pool.query(
+        `INSERT INTO checklist_signatures 
+         (user_id, nik, category_id, date_key, shift, signature_status, area_id, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)`,
+        [userId, nik, categoryId, dateKey, shift, signatureStatus, areaId]
+      );
+
+      return NextResponse.json({
+        success: true,
+        message: 'Signature berhasil disimpan',
+        areaId,
+        action: 'inserted'
+      });
+    }
+
   } catch (error) {
     console.error('❌ Save signature error:', error);
-    return NextResponse.json({ 
+    return NextResponse.json({
       error: 'Gagal menyimpan signature ke database',
       details: error instanceof Error ? error.message : 'Unknown error'
     }, { status: 500 });
   }
+}
+
+// app/api/gauges/checkpoints/get/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import pool from '@/lib/db';
+
+function checkAuth(request: NextRequest) {
+  const sessionToken = request.headers.get('authorization') || request.headers.get('x-session-token');
+  if (!sessionToken) {
+    const token = request.cookies.get('auth_session_token')?.value;
+    if (token) return { authenticated: true };
+    return { authenticated: false };
+  }
+  return { authenticated: true };
+}
+
+export async function GET(request: NextRequest) {
+  const auth = checkAuth(request);
+  if (!auth.authenticated) {
+    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+  }
+
+  try {
+    const { searchParams } = new URL(request.url);
+    const gaugeId = searchParams.get('gaugeId');
+    const dateKey = searchParams.get('dateKey');
+    const shift = searchParams.get('shift');
+
+    if (!gaugeId || !dateKey || !shift) {
+      return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
+    }
+
+    console.log('🔍 [Checkpoint Results] Fetching for:', { gaugeId, dateKey, shift });
+
+    const result = await pool.query(
+      `SELECT 
+        gcr.checkpoint_id,
+        gc.checkpoint_name,
+        gcr.status,
+        gcr.notes,
+        gcr.checked_at
+       FROM gauge_checkpoint_results gcr
+       JOIN gauge_checkpoints gc ON gcr.checkpoint_id = gc.id
+       WHERE gcr.gauge_id = $1 
+         AND gcr.date_key = $2 
+         AND gcr.shift = $3
+       ORDER BY gc.checkpoint_order ASC`,
+      [gaugeId, dateKey, shift]
+    );
+
+    console.log('✅ [Checkpoint Results] Found:', result.rows.length);
+
+    return NextResponse.json({
+      success: true,
+      checkpointResults: result.rows.map(row => ({
+        checkpointId: row.checkpoint_id,
+        checkpointName: row.checkpoint_name,
+        status: row.status,
+        notes: row.notes,
+        checkedAt: row.checked_at
+      }))
+    });
+  } catch (error) {
+    console.error('❌ [Checkpoint Results] Error:', error);
+    return NextResponse.json({ error: 'Server error' }, { status: 500 });
+  }
+}
+
+export async function OPTIONS(request: NextRequest) {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Session-Token',
+    },
+  });
+}
+
+// app/api/gauges/checkpoints/save/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import pool from '@/lib/db';
+
+// =====================================================================
+// === TYPE DEFINITIONS ===
+// =====================================================================
+interface CheckpointResultInput {
+  checkpointId: string;
+  checkpointName: string;
+  status: '-' | 'OK' | 'NG';
+  notes?: string;
+}
+
+interface SaveCheckpointRequestBody {
+  gaugeId: string;
+  gaugeType: string;
+  userId: string;
+  nik: string;
+  dateKey: string;      // YYYY-MM-DD
+  shift: 'A' | 'B';
+  checkpointResults: CheckpointResultInput[];
+}
+
+// =====================================================================
+// === AUTHENTICATION CHECK HELPER ===
+// =====================================================================
+function checkAuth(request: NextRequest): { authenticated: boolean; userId?: string; error?: string } {
+  try {
+    const sessionToken = request.headers.get('authorization') || 
+                         request.headers.get('x-session-token');
+    
+    if (!sessionToken) {
+      const cookies = request.cookies;
+      const token = cookies.get('auth_session_token')?.value;
+      if (token) {
+        return { authenticated: true };
+      }
+      
+      return { 
+        authenticated: false, 
+        error: 'Unauthorized - No session token found' 
+      };
+    }
+    
+    return { authenticated: true };
+  } catch (error) {
+    console.error('❌ Auth check error:', error);
+    return { 
+      authenticated: false, 
+      error: 'Authentication check failed' 
+    };
+  }
+}
+
+// =====================================================================
+// === MAIN API HANDLER - SAVE CHECKPOINT RESULTS ===
+// =====================================================================
+export async function POST(request: NextRequest) {
+  const client = await pool.connect();
+  
+  try {
+    // ✅ STEP 1: Authentication Check
+    const auth = checkAuth(request);
+    if (!auth.authenticated) {
+      console.warn('🚫 Unauthorized access attempt to /api/gauges/checkpoints/save');
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'Unauthorized',
+          message: 'Silakan login kembali'
+        }, 
+        { status: 401 }
+      );
+    }
+    
+    // ✅ STEP 2: Parse request body
+    const body: SaveCheckpointRequestBody = await request.json();
+    const {
+      gaugeId,
+      gaugeType,
+      userId,
+      nik,
+      dateKey,
+      shift,
+      checkpointResults
+    } = body;
+    
+    // ✅ STEP 3: Validate required fields
+    if (!gaugeId || !userId || !dateKey || !shift || !checkpointResults?.length) {
+      console.warn('⚠️ Missing required fields:', { gaugeId, userId, dateKey, shift, checkpointCount: checkpointResults?.length });
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'Missing required fields',
+          message: 'Field gaugeId, userId, dateKey, shift, dan checkpointResults wajib diisi'
+        }, 
+        { status: 400 }
+      );
+    }
+    
+    console.log('💾 [Save Checkpoints] Saving results:', {
+      gaugeId,
+      gaugeType,
+      userId,
+      dateKey,
+      shift,
+      checkpointCount: checkpointResults.length
+    });
+    
+    // ✅ STEP 4: Begin transaction
+    await client.query('BEGIN');
+    
+    // ✅ STEP 5: Validasi gauge exists dan active
+    const gaugeCheck = await client.query(
+      'SELECT id, gauge_code, gauge_type, is_active FROM gauges WHERE id = $1',
+      [gaugeId]
+    );
+    
+    if (gaugeCheck.rows.length === 0) {
+      await client.query('ROLLBACK');
+      console.error('❌ Gauge not found:', gaugeId);
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'Gauge tidak ditemukan',
+          message: `Gauge dengan ID "${gaugeId}" tidak ditemukan`
+        }, 
+        { status: 404 }
+      );
+    }
+    
+    if (!gaugeCheck.rows[0].is_active) {
+      await client.query('ROLLBACK');
+      console.error('❌ Gauge not active:', gaugeId);
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'Gauge tidak aktif',
+          message: `Gauge "${gaugeCheck.rows[0].gauge_code}" tidak aktif`
+        }, 
+        { status: 400 }
+      );
+    }
+    
+    // ✅ STEP 6: Validasi gauge_type match
+    if (gaugeCheck.rows[0].gauge_type !== gaugeType) {
+      console.warn('⚠️ Gauge type mismatch:', {
+        expected: gaugeType,
+        actual: gaugeCheck.rows[0].gauge_type
+      });
+      // Tidak reject, hanya warning (bisa diperketat nanti)
+    }
+    
+    // ✅ STEP 7: UPSERT setiap checkpoint result
+    const savedResults: any[] = [];
+    
+    for (const item of checkpointResults) {
+      const { checkpointId, checkpointName, status, notes } = item;
+      
+      // Validasi checkpoint exists
+      const checkpointCheck = await client.query(
+        'SELECT id, gauge_type, is_active FROM gauge_checkpoints WHERE id = $1',
+        [checkpointId]
+      );
+      
+      if (checkpointCheck.rows.length === 0) {
+        console.warn('⚠️ Checkpoint not found:', checkpointId);
+        continue; // Skip checkpoint yang tidak ditemukan
+      }
+      
+      if (!checkpointCheck.rows[0].is_active) {
+        console.warn('⚠️ Checkpoint not active:', checkpointId);
+        continue; // Skip checkpoint yang tidak aktif
+      }
+      
+      // UPSERT: Insert atau Update jika sudah ada
+      const upsertQuery = `
+        INSERT INTO gauge_checkpoint_results 
+        (gauge_id, checkpoint_id, user_id, nik, date_key, shift, status, notes, checked_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+        ON CONFLICT (gauge_id, checkpoint_id, date_key, shift)
+        DO UPDATE SET
+          status = EXCLUDED.status,
+          notes = EXCLUDED.notes,
+          user_id = EXCLUDED.user_id,
+          nik = EXCLUDED.nik,
+          checked_at = NOW()
+        RETURNING id, status, checked_at
+      `;
+      
+      const upsertResult = await client.query(upsertQuery, [
+        gaugeId,
+        checkpointId,
+        userId,
+        nik,
+        dateKey,
+        shift,
+        status,
+        notes || null
+      ]);
+      
+      savedResults.push({
+        checkpointId,
+        checkpointName,
+        status,
+        savedId: upsertResult.rows[0]?.id,
+        checkedAt: upsertResult.rows[0]?.checked_at
+      });
+    }
+    
+    // ✅ STEP 8: Commit transaction
+    await client.query('COMMIT');
+    
+    console.log('✅ [Save Checkpoints] Successfully saved:', savedResults.length, 'checkpoint results');
+    
+    // ✅ STEP 9: Calculate summary
+    const summary = {
+      total: checkpointResults.length,
+      ok: checkpointResults.filter(r => r.status === 'OK').length,
+      ng: checkpointResults.filter(r => r.status === 'NG').length,
+      pending: checkpointResults.filter(r => r.status === '-').length
+    };
+    
+    // ✅ STEP 10: Return success response
+    return NextResponse.json({
+      success: true,
+      message: 'Checkpoint results saved successfully',
+      saved: savedResults.length,
+      summary,
+      gauge: {
+        id: gaugeId,
+        type: gaugeType,
+        code: gaugeCheck.rows[0].gauge_code
+      }
+    });
+    
+  } catch (error: any) {
+    // ✅ STEP 11: Rollback on error
+    await client.query('ROLLBACK');
+    
+    console.error('❌ [Save Checkpoints] Error:', error.message);
+    console.error('Stack:', error.stack);
+    
+    return NextResponse.json(
+      {
+        success: false,
+        error: 'Gagal menyimpan hasil checkpoint',
+        message: error.message || 'Terjadi kesalahan pada server',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      }, 
+      { status: 500 }
+    );
+  } finally {
+    // ✅ STEP 12: Release client
+    client.release();
+  }
+}
+
+// =====================================================================
+// === OPTIONS HANDLER (for CORS if needed) ===
+// =====================================================================
+export async function OPTIONS(request: NextRequest) {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Session-Token',
+    },
+  });
+}
+
+// app/api/gauges/checkpoints/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import pool from '@/lib/db';
+
+// =====================================================================
+// === AUTHENTICATION CHECK HELPER ===
+// =====================================================================
+function checkAuth(request: NextRequest): { authenticated: boolean; userId?: string; error?: string } {
+  try {
+    // Check session token dari header atau localStorage (via cookie)
+    const sessionToken = request.headers.get('authorization') || 
+                         request.headers.get('x-session-token');
+    
+    // Jika tidak ada token, cek dari cookies (jika ada)
+    if (!sessionToken) {
+      const cookies = request.cookies;
+      const token = cookies.get('auth_session_token')?.value;
+      if (token) {
+        return { authenticated: true };
+      }
+      
+      // ⚠️ Untuk development, bisa bypass auth (HAPUS di production!)
+      // return { authenticated: true };
+      
+      return { 
+        authenticated: false, 
+        error: 'Unauthorized - No session token found' 
+      };
+    }
+    
+    // Validasi token format (optional - bisa diperkuat dengan JWT verification)
+    if (!sessionToken.startsWith('sess_')) {
+      console.warn('⚠️ Invalid token format:', sessionToken.substring(0, 10) + '...');
+      // Tetap allow untuk sekarang (bisa diperketat nanti)
+    }
+    
+    return { authenticated: true };
+  } catch (error) {
+    console.error('❌ Auth check error:', error);
+    return { 
+      authenticated: false, 
+      error: 'Authentication check failed' 
+    };
+  }
+}
+
+// =====================================================================
+// === MAIN API HANDLER - GET CHECKPOINTS ===
+// =====================================================================
+export async function GET(request: NextRequest) {
+  // ✅ STEP 1: Authentication Check
+  const auth = checkAuth(request);
+  if (!auth.authenticated) {
+    console.warn('🚫 Unauthorized access attempt to /api/gauges/checkpoints');
+    return NextResponse.json(
+      { 
+        success: false, 
+        error: 'Unauthorized',
+        message: 'Silakan login kembali'
+      }, 
+      { status: 401 }
+    );
+  }
+  
+  try {
+    // ✅ STEP 2: Parse query parameters
+    const { searchParams } = new URL(request.url);
+    const gaugeType = searchParams.get('gaugeType');
+    
+    // Validate gaugeType parameter
+    if (!gaugeType) {
+      console.warn('⚠️ Missing gaugeType parameter');
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'Missing gaugeType parameter',
+          message: 'Parameter gaugeType wajib diisi'
+        }, 
+        { status: 400 }
+      );
+    }
+    
+    // ✅ STEP 3: Log request for debugging
+    console.log('🔍 [Checkpoints API] Fetching checkpoints for gauge_type:', gaugeType);
+    
+    // ✅ STEP 4: Query database
+    const result = await pool.query(
+      `SELECT 
+        id,
+        gauge_type,
+        checkpoint_name,
+        checkpoint_order,
+        is_required,
+        is_active,
+        created_at,
+        updated_at
+       FROM gauge_checkpoints
+       WHERE gauge_type = $1 AND is_active = TRUE
+       ORDER BY checkpoint_order ASC`,
+      [gaugeType]
+    );
+    
+    // ✅ STEP 5: Handle no checkpoints found
+    if (result.rows.length === 0) {
+      console.warn('⚠️ [Checkpoints API] No checkpoints found for gauge_type:', gaugeType);
+      return NextResponse.json(
+        { 
+          success: true,
+          checkpoints: [],
+          message: `Tidak ada checklist untuk gauge type "${gaugeType}"`
+        }, 
+        { status: 200 }
+      );
+    }
+    
+    // ✅ STEP 6: Return success response
+    console.log('✅ [Checkpoints API] Checkpoints found:', result.rows.length);
+    
+    return NextResponse.json({
+      success: true,
+      checkpoints: result.rows.map(row => ({
+        id: row.id,
+        gauge_type: row.gauge_type,
+        checkpoint_name: row.checkpoint_name,
+        checkpoint_order: row.checkpoint_order,
+        is_required: row.is_required,
+        is_active: row.is_active
+      }))
+    });
+    
+  } catch (error) {
+    // ✅ STEP 7: Error handling
+    console.error('❌ [Checkpoints API] Get checkpoints error:', error);
+    
+    return NextResponse.json(
+      {
+        success: false,
+        error: 'Server error',
+        message: 'Terjadi kesalahan pada server',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      }, 
+      { status: 500 }
+    );
+  }
+}
+
+// =====================================================================
+// === OPTIONS HANDLER (for CORS if needed) ===
+// =====================================================================
+export async function OPTIONS(request: NextRequest) {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Session-Token',
+    },
+  });
+}
+
+// app/api/gauges/get-by-code/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import pool from '@/lib/db';
+
+// =====================================================================
+// === AUTHENTICATION CHECK HELPER ===
+// =====================================================================
+function checkAuth(request: NextRequest): { authenticated: boolean; userId?: string; error?: string } {
+  try {
+    // Check session token dari header atau localStorage (via cookie)
+    const sessionToken = request.headers.get('authorization') || 
+                         request.headers.get('x-session-token');
+    
+    // Jika tidak ada token, cek dari cookies (jika ada)
+    if (!sessionToken) {
+      const cookies = request.cookies;
+      const token = cookies.get('auth_session_token')?.value;
+      if (token) {
+        return { authenticated: true };
+      }
+      
+      // ⚠️ Untuk development, bisa bypass auth (HAPUS di production!)
+      // return { authenticated: true };
+      
+      return { 
+        authenticated: false, 
+        error: 'Unauthorized - No session token found' 
+      };
+    }
+    
+    // Validasi token format (optional - bisa diperkuat dengan JWT verification)
+    if (!sessionToken.startsWith('sess_')) {
+      console.warn('⚠️ Invalid token format:', sessionToken.substring(0, 10) + '...');
+      // Tetap allow untuk sekarang (bisa diperketat nanti)
+    }
+    
+    return { authenticated: true };
+  } catch (error) {
+    console.error('❌ Auth check error:', error);
+    return { 
+      authenticated: false, 
+      error: 'Authentication check failed' 
+    };
+  }
+}
+
+// =====================================================================
+// === MAIN API HANDLER ===
+// =====================================================================
+export async function GET(request: NextRequest) {
+  // ✅ STEP 1: Authentication Check
+  const auth = checkAuth(request);
+  if (!auth.authenticated) {
+    console.warn('🚫 Unauthorized access attempt to /api/gauges/get-by-code');
+    return NextResponse.json(
+      {
+        success: false,
+        error: 'Unauthorized',
+        message: 'Silakan login kembali'
+      },
+      { status: 401 }
+    );
+  }
+  
+  try {
+    // ✅ STEP 2: Parse query parameters
+    const { searchParams } = new URL(request.url);
+    const gaugeCode = searchParams.get('gaugeCode');
+    
+    // Validate gaugeCode parameter
+    if (!gaugeCode) {
+      console.warn('⚠️ Missing gaugeCode parameter');
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'Missing gaugeCode parameter',
+          message: 'Parameter gaugeCode wajib diisi'
+        }, 
+        { status: 400 }
+      );
+    }
+    
+    // ✅ STEP 3: Log request for debugging
+    console.log('🔍 [Gauge API] Fetching gauge:', gaugeCode);
+    
+    // ✅ STEP 4: Query database
+    const result = await pool.query(
+      `SELECT 
+        g.id,
+        g.gauge_code,
+        g.gauge_type,
+        g.gauge_name,
+        g.category_id,
+        g.area_id,
+        g.calibration_due,
+        g.is_active,
+        ca.area_name,
+        ca.area_code
+       FROM gauges g
+       LEFT JOIN checklist_areas ca ON g.area_id = ca.id
+       WHERE g.gauge_code = $1 AND g.is_active = TRUE`,
+      [gaugeCode]
+    );
+    
+    // ✅ STEP 5: Handle not found
+    if (result.rows.length === 0) {
+      console.warn('⚠️ [Gauge API] Gauge not found:', gaugeCode);
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'Gauge tidak ditemukan',
+          message: `Gauge dengan kode "${gaugeCode}" tidak ditemukan atau tidak aktif`
+        }, 
+        { status: 404 }
+      );
+    }
+    
+    // ✅ STEP 6: Return success response
+    const gauge = result.rows[0];
+    console.log('✅ [Gauge API] Gauge found:', gauge.gauge_code, gauge.gauge_name);
+    
+    return NextResponse.json({
+      success: true,
+      gauge: {
+        id: gauge.id,
+        gauge_code: gauge.gauge_code,
+        gauge_type: gauge.gauge_type,
+        gauge_name: gauge.gauge_name,
+        category_id: gauge.category_id,
+        area_id: gauge.area_id,
+        calibration_due: gauge.calibration_due,
+        is_active: gauge.is_active,
+        area_name: gauge.area_name,
+        area_code: gauge.area_code
+      }
+    });
+    
+  } catch (error) {
+    // ✅ STEP 7: Error handling
+    console.error('❌ [Gauge API] Get gauge error:', error);
+    
+    return NextResponse.json(
+      {
+        success: false,
+        error: 'Server error',
+        message: 'Terjadi kesalahan pada server',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      }, 
+      { status: 500 }
+    );
+  }
+}
+
+// =====================================================================
+// === OPTIONS HANDLER (for CORS if needed) ===
+// =====================================================================
+export async function OPTIONS(request: NextRequest) {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Session-Token',
+    },
+  });
+}
+
+// app/api/gauges/get-by-gauge-id/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import pool from '@/lib/db';
+
+function checkAuth(request: NextRequest) {
+  const sessionToken = request.headers.get('authorization') || request.headers.get('x-session-token');
+  if (!sessionToken) {
+    const token = request.cookies.get('auth_session_token')?.value;
+    if (token) return { authenticated: true };
+    return { authenticated: false };
+  }
+  return { authenticated: true };
+}
+
+export async function GET(request: NextRequest) {
+  const auth = checkAuth(request);
+  if (!auth.authenticated) {
+    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+  }
+
+  try {
+    const { searchParams } = new URL(request.url);
+    const gaugeId = searchParams.get('gaugeId');
+
+    if (!gaugeId) {
+      return NextResponse.json({ error: 'Missing gaugeId parameter' }, { status: 400 });
+    }
+
+    const result = await pool.query(
+      `SELECT 
+        g.id,
+        g.gauge_code,
+        g.gauge_type,
+        g.gauge_name,
+        g.category_id,
+        g.area_id,
+        g.calibration_due,
+        g.is_active,
+        ca.area_name,
+        ca.area_code
+       FROM gauges g
+       LEFT JOIN checklist_areas ca ON g.area_id = ca.id
+       WHERE g.id = $1 AND g.is_active = TRUE`,
+      [gaugeId]
+    );
+
+    if (result.rows.length === 0) {
+      return NextResponse.json({ success: false, error: 'Gauge not found' }, { status: 404 });
+    }
+
+    return NextResponse.json({
+      success: true,
+      gauge: result.rows[0]
+    });
+  } catch (error) {
+    console.error('❌ Get gauge by ID error:', error);
+    return NextResponse.json({ error: 'Server error' }, { status: 500 });
+  }
+}
+
+export async function OPTIONS(request: NextRequest) {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Session-Token',
+    },
+  });
+}
+
+// app/api/gauges/get-inspection/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import pool from '@/lib/db';
+
+export async function GET(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const gaugeId = searchParams.get('gaugeId');
+    const dateKey = searchParams.get('dateKey');
+    const shift = searchParams.get('shift');
+
+    if (!gaugeId || !dateKey || !shift) {
+      return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
+    }
+
+    const result = await pool.query(
+      `SELECT 
+        gi.id,
+        gi.gauge_id,
+        gi.user_id,
+        gi.date_key,
+        gi.shift,
+        gi.status,
+        gi.ng_description,
+        gi.ng_department,
+        gi.scanned_at,
+        u.full_name as scanned_by
+       FROM gauge_inspections gi
+       LEFT JOIN users u ON gi.user_id = u.id
+       WHERE gi.gauge_id = $1 AND gi.date_key = $2 AND gi.shift = $3`,
+      [gaugeId, dateKey, shift]
+    );
+
+    return NextResponse.json({
+      success: true,
+      inspection: result.rows[0] || null
+    });
+
+  } catch (error) {
+    console.error('❌ Get inspection error:', error);
+    return NextResponse.json({ 
+      error: 'Server error'
+    }, { status: 500 });
+  }
+}
+
+// app/api/gauges/save-inspection/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import pool from '@/lib/db';
+
+export async function POST(request: NextRequest) {
+  const client = await pool.connect();
+  
+  try {
+    const body = await request.json();
+    const { 
+      gaugeId, 
+      userId, 
+      nik, 
+      dateKey, 
+      shift, 
+      status, 
+      ngDescription, 
+      ngDepartment 
+    } = body;
+
+    if (!gaugeId || !userId || !dateKey || !shift || !status) {
+      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    }
+
+    await client.query('BEGIN');
+
+    // Validasi gauge
+    const gaugeCheck = await client.query(
+      'SELECT id, is_active FROM gauges WHERE id = $1',
+      [gaugeId]
+    );
+
+    if (gaugeCheck.rows.length === 0) {
+      throw new Error('Gauge tidak ditemukan');
+    }
+
+    if (!gaugeCheck.rows[0].is_active) {
+      throw new Error('Gauge tidak aktif');
+    }
+
+    // UPSERT: Insert atau Update jika sudah ada
+    if (status === '-') {
+      // Delete jika status "-"
+      await client.query(
+        `DELETE FROM gauge_inspections
+         WHERE gauge_id = $1 AND date_key = $2 AND shift = $3`,
+        [gaugeId, dateKey, shift]
+      );
+
+      await client.query('COMMIT');
+      return NextResponse.json({ 
+        success: true, 
+        message: 'Inspeksi dihapus',
+        deleted: true
+      });
+
+    } else {
+      // Insert atau Update
+      await client.query(
+        `INSERT INTO gauge_inspections 
+         (gauge_id, user_id, date_key, shift, status, ng_description, ng_department, scanned_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+         ON CONFLICT (gauge_id, date_key, shift)
+         DO UPDATE SET
+           status = EXCLUDED.status,
+           ng_description = EXCLUDED.ng_description,
+           ng_department = EXCLUDED.ng_department,
+           scanned_at = NOW()`,
+        [gaugeId, userId, dateKey, shift, status, ngDescription || null, ngDepartment || null]
+      );
+
+      await client.query('COMMIT');
+      return NextResponse.json({ 
+        success: true, 
+        message: 'Inspeksi berhasil disimpan'
+      });
+    }
+
+  } catch (error: any) {
+    await client.query('ROLLBACK');
+    console.error('❌ Save inspection error:', error.message);
+    return NextResponse.json({ 
+      error: 'Gagal menyimpan inspeksi',
+      detail: error.message
+    }, { status: 500 });
+  } finally {
+    client.release();
+  }
+}
+
+// app/api/gauges/scanned-history/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import pool from '@/lib/db';
+
+function checkAuth(request: NextRequest): { authenticated: boolean; error?: string } {
+  try {
+    const sessionToken = request.headers.get('authorization') || request.headers.get('x-session-token');
+    if (!sessionToken) {
+      const token = request.cookies.get('auth_session_token')?.value;
+      if (token) return { authenticated: true };
+      return { authenticated: false, error: 'Unauthorized' };
+    }
+    return { authenticated: true };
+  } catch (error) {
+    return { authenticated: false, error: 'Authentication failed' };
+  }
+}
+
+export async function GET(request: NextRequest) {
+  const auth = checkAuth(request);
+  if (!auth.authenticated) {
+    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+  }
+
+  try {
+    const { searchParams } = new URL(request.url);
+    const dateKey = searchParams.get('dateKey');
+    const shift = searchParams.get('shift');
+    // ✅ areaCode TIDAK dipakai untuk filter — semua gauge ditampilkan
+
+    if (!dateKey || !shift) {
+      return NextResponse.json(
+        { success: false, error: 'Missing required parameters: dateKey, shift' },
+        { status: 400 }
+      );
+    }
+
+    console.log('🔍 [Scanned History] Fetching ALL gauges for:', { dateKey, shift });
+
+    // ✅ Query tanpa filter area — semua gauge yang sudah dicek hari ini
+    const query = `
+      SELECT 
+        g.id as gauge_id,
+        g.gauge_code,
+        g.gauge_type,
+        g.gauge_name,
+        g.area_id,
+        ca.area_code,
+        ca.area_name,
+        CASE 
+          WHEN COUNT(CASE WHEN gcr.status = 'NG' THEN 1 END) > 0 THEN 'NG'
+          WHEN COUNT(CASE WHEN gcr.status = '-' THEN 1 END) > 0 THEN '-'
+          ELSE 'OK'
+        END as overall_status,
+        COUNT(CASE WHEN gcr.status = 'NG' THEN 1 END) as ng_count,
+        COUNT(*) as checkpoint_count,
+        MAX(gcr.checked_at) as checked_at
+      FROM gauge_checkpoint_results gcr
+      JOIN gauges g ON gcr.gauge_id = g.id
+      JOIN gauge_checkpoints gc ON gcr.checkpoint_id = gc.id
+      LEFT JOIN checklist_areas ca ON g.area_id = ca.id
+      WHERE gcr.date_key = $1 
+        AND gcr.shift = $2
+      GROUP BY g.id, g.gauge_code, g.gauge_type, g.gauge_name, g.area_id, ca.area_code, ca.area_name
+      ORDER BY MAX(gcr.checked_at) DESC
+    `;
+
+    const result = await pool.query(query, [dateKey, shift]);
+
+    console.log('✅ [Scanned History] Results found:', result.rows.length);
+
+    return NextResponse.json({
+      success: true,
+      history: result.rows.map(row => ({
+        gauge_id: row.gauge_id,
+        gauge_code: row.gauge_code,
+        gauge_type: row.gauge_type,
+        gauge_name: row.gauge_name,
+        area_code: row.area_code,    // ✅ Tambah info area
+        area_name: row.area_name,    // ✅ Tambah info area
+        overall_status: row.overall_status,
+        has_ng: row.ng_count > 0,
+        checked_at: row.checked_at,
+        checkpoint_count: parseInt(row.checkpoint_count),
+        ng_count: parseInt(row.ng_count)
+      }))
+    });
+
+  } catch (error) {
+    console.error('❌ [Scanned History] Error:', error);
+    return NextResponse.json(
+      { success: false, error: 'Server error', details: error instanceof Error ? error.message : 'Unknown' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function OPTIONS(request: NextRequest) {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Session-Token',
+    },
+  });
 }
 
 // app/api/pre-assy/get-results/route.ts

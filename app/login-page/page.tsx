@@ -49,16 +49,12 @@ export default function LoginPage() {
               Kelola checklist Anda dengan efisien menggunakan platform digital kami. Akses mudah, monitoring real-time,
               dan laporan komprehensif.
             </p>
-            <Link href="/signup-page" className="btn-outline">
-              Daftar Sekarang
-            </Link>
           </div>
 
           <div className="login-form-section">
             <div className="login-card">
               <div className="login-card-header">
                 <h2>Login</h2>
-                <p>Masuk ke akun Anda</p>
               </div>
 
               <form className="auth-form" onSubmit={handleSubmit}>
@@ -67,6 +63,7 @@ export default function LoginPage() {
                   <div className="input-field">
                     <input
                       id="username"
+                      className="us-pw-input"
                       type="text"
                       placeholder="Masukkan username Anda"
                       value={username}
@@ -82,6 +79,7 @@ export default function LoginPage() {
                   <div className="input-field">
                     <input
                       id="password"
+                      className="us-pw-input"
                       type="password"
                       placeholder="Masukkan password Anda"
                       value={password}

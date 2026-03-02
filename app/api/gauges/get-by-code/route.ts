@@ -53,11 +53,11 @@ export async function GET(request: NextRequest) {
   if (!auth.authenticated) {
     console.warn('🚫 Unauthorized access attempt to /api/gauges/get-by-code');
     return NextResponse.json(
-      { 
-        success: false, 
+      {
+        success: false,
         error: 'Unauthorized',
         message: 'Silakan login kembali'
-      }, 
+      },
       { status: 401 }
     );
   }

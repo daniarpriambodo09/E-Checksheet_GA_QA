@@ -806,7 +806,8 @@ export default function ModernDashboard() {
 
         .main-content {
           flex: 1;
-          padding: 32px;
+          padding-left: 70px;
+          padding-top : 20px;
           min-height: calc(100vh - 64px);
           max-width: 1500px;
           margin: 0 auto;
@@ -1535,6 +1536,165 @@ export default function ModernDashboard() {
           .history-table th,
           .history-table td {
             padding: 8px 6px;
+          }
+
+          .filter-container {
+            flex-wrap: wrap;
+          }
+
+          .category-dropdown {
+            min-width: auto;
+          }
+
+          .section-title {
+            font-size: 18px;
+            margin: 24px 0 12px 0;
+          }
+
+          .user-item {
+            padding: 10px;
+          }
+
+          .user-rank-badge {
+            width: 28px;
+            height: 28px;
+            font-size: 12px;
+          }
+        }
+
+        /* ADDITIONAL MOBILE RESPONSIVE - PHONES */
+        @media (max-width: 640px) {
+          .main-content {
+            padding: 10px;
+          }
+
+          .header-section {
+            padding: 12px;
+          }
+
+          .page-title {
+            font-size: 18px;
+          }
+
+          .page-subtitle {
+            font-size: 12px;
+          }
+
+          .filter-container {
+            flex-direction: column;
+            gap: 8px;
+            padding: 10px 12px;
+          }
+
+          .filter-label {
+            font-size: 12px;
+          }
+
+          .category-dropdown {
+            width: 100%;
+            padding: 8px;
+            font-size: 13px;
+          }
+
+          .stats-grid {
+            grid-template-columns: 1fr;
+            gap: 10px;
+          }
+
+          .stat-card {
+            padding: 12px 10px;
+          }
+
+          .stat-value {
+            font-size: 18px;
+          }
+
+          .stat-label {
+            font-size: 11px;
+          }
+
+          .month-navigation {
+            gap: 8px;
+            padding: 12px;
+          }
+
+          .month-btn {
+            padding: 8px 12px;
+            font-size: 12px;
+          }
+
+          .month-display {
+            font-size: 14px;
+          }
+
+          .section-title {
+            font-size: 16px;
+            margin: 18px 0 10px 0;
+          }
+
+          .chart-box {
+            padding: 12px;
+            border-radius: 10px;
+          }
+
+          .chart-title {
+            font-size: 13px;
+            margin-bottom: 10px;
+          }
+
+          .chart-container {
+            height: 180px;
+          }
+
+          .chart-container.large {
+            height: 220px;
+          }
+
+          .chart-container.small {
+            height: 160px;
+          }
+
+          .history-table-container {
+            border-radius: 10px;
+          }
+
+          .history-table {
+            font-size: 10px;
+          }
+
+          .history-table th,
+          .history-table td {
+            padding: 6px 4px;
+            font-size: 9px;
+          }
+
+          .pagination-container {
+            gap: 8px;
+            padding: 12px;
+          }
+
+          .pagination-btn {
+            padding: 6px 12px;
+            font-size: 12px;
+          }
+
+          .pagination-info {
+            font-size: 11px;
+          }
+
+          .user-item {
+            padding: 8px;
+            gap: 8px;
+          }
+
+          .user-rank-badge {
+            width: 26px;
+            height: 26px;
+            font-size: 10px;
+          }
+
+          .user-count {
+            font-size: 10px;
           }
         }
       `}</style>

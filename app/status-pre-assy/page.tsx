@@ -2567,6 +2567,850 @@ const CS_REMOVE_TOOL_ITEMS: CSRemoveToolItem[] = useMemo(() => [
           background: #1976d2;
           color: white;
         }
+
+        /* RESPONSIVE IMPROVEMENTS */
+        @media (max-width: 1024px) {
+          .page-content {
+            padding-left: 70px;
+            padding-top: 20px;
+            padding-right: 16px;
+            padding-bottom: 16px;
+          }
+
+          .header h1 {
+            font-size: 1.3rem;
+          }
+
+          .button-group {
+            gap: 8px;
+            padding: 12px;
+            margin-bottom: 18px;
+          }
+
+          .btn-mode {
+            padding: 8px 16px;
+            font-size: 0.85rem;
+          }
+
+          .status-table {
+            font-size: 0.54rem;
+            line-height: 1.05;
+          }
+          
+          .status-table th,
+          .status-table td {
+            padding: 0.5px 0.3px;
+            font-size: 0.54rem;
+            border: 0.5px solid #cbd5e1;
+            height: auto;
+          }
+
+          .status-table th {
+            padding: 1px 0.3px;
+            font-size: 0.54rem;
+            background: #f1f5f9;
+            color: #334155;
+            font-weight: 600;
+          }
+
+          .status-table th,
+          .status-table td {
+            padding: 6px 5px;
+          }
+
+          .col-machine {
+            min-width: 80px;
+          }
+          
+          .col-kind {
+            min-width: 70px;
+          }
+
+          .status-dropdown {
+            font-size: 11px;
+          }
+        }
+
+        @media (max-width: 768px) {
+          .page-content {
+            padding-left: 16px;
+            padding-top: 16px;
+            padding-right: 12px;
+            padding-bottom: 12px;
+            max-width: 100%;
+          }
+
+          .header {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 16px;
+          }
+
+          .header h1 {
+            font-size: 1.1rem;
+          }
+
+          .role-info {
+            font-size: 0.85rem;
+            gap: 10px;
+            margin-bottom: 8px;
+          }
+
+          .role-badge {
+            font-size: 0.8rem;
+            padding: 4px 10px;
+          }
+
+          .button-group {
+            gap: 6px;
+            padding: 10px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+          }
+
+          .btn-mode {
+            padding: 7px 12px;
+            font-size: 0.75rem;
+          }
+
+          .month-header {
+            font-size: 0.95rem;
+            padding: 6px 0;
+          }
+
+          .status-table {
+            font-size: 0.75rem;
+          }
+
+          .status-table th,
+          .status-table td {
+            padding: 5px 4px;
+            font-size: 0.7rem;
+          }
+
+          .status-table th {
+            font-size: 0.7rem;
+            padding: 4px 4px;
+          }
+
+          .col-machine {
+            min-width: 70px;
+          }
+          
+          .col-kind {
+            min-width: 60px;
+          }
+
+          .col-size {
+            min-width: 40px;
+          }
+
+          .col-shift,
+          .col-waktu,
+          .col-standard {
+            min-width: 60px;
+          }
+
+          .col-date-cell {
+            min-width: 30px;
+            height: 30px;
+          }
+
+          .status-dropdown {
+            font-size: 10px;
+          }
+
+          .status-badge {
+            font-size: 10px;
+            padding: 2px 4px;
+          }
+
+          /* Modal responsive */
+          .ng-modal {
+            width: 95%;
+            max-width: 450px;
+            padding: 16px;
+          }
+
+          .ng-modal h3 {
+            font-size: 1rem;
+          }
+
+          .ng-form-group {
+            margin-bottom: 12px;
+          }
+
+          .ng-form-group label {
+            font-size: 0.9rem;
+          }
+
+          .ng-form-group textarea,
+          .ng-form-group select {
+            font-size: 0.85rem;
+            padding: 6px;
+          }
+        }
+
+        @media (max-width: 600px) {
+          .page-content {
+            padding-left: 6px;
+            padding-top: 8px;
+            padding-right: 6px;
+            padding-bottom: 8px;
+            max-width: 100%;
+            width: 100%;
+            background: #fafbfc;
+          }
+
+          .header {
+            padding: 8px 8px;
+            gap: 5px;
+            margin-bottom: 8px;
+            border-radius: 5px;
+            background: #1976d2;
+            color: white;
+            flex-direction: column;
+            align-items: flex-start;
+          }
+
+          .header h1 {
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: white;
+            margin: 0;
+            line-height: 1.1;
+          }
+
+          .role-info {
+            font-size: 0.6rem;
+            gap: 4px;
+            margin-bottom: 0;
+            flex-wrap: wrap;
+            color: white;
+          }
+
+          .role-info span {
+            color: white;
+          }
+
+          .role-badge {
+            font-size: 0.55rem;
+            padding: 2px 6px;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            font-weight: 600;
+          }
+
+          .button-group {
+            gap: 5px;
+            padding: 6px;
+            margin-bottom: 8px;
+            flex-wrap: wrap;
+            background: white;
+            border-radius: 3px;
+            border: 1px solid #e2e8f0;
+          }
+
+          .btn-mode {
+            padding: 5px 8px;
+            font-size: 0.6rem;
+            border-radius: 3px;
+            font-weight: 600;
+            min-height: 28px;
+            flex: 1;
+            min-width: 70px;
+            text-align: center;
+          }
+
+          .header {
+            padding: 14px;
+            gap: 10px;
+            margin-bottom: 14px;
+            border-radius: 8px;
+            background: #1976d2;
+            color: white;
+          }
+
+          .header h1 {
+            font-size: 1rem;
+            font-weight: 700;
+            color: white;
+            margin: 0;
+          }
+
+          .role-info {
+            font-size: 0.8rem;
+            gap: 8px;
+            margin-bottom: 0;
+            flex-wrap: wrap;
+            color: white;
+          }
+
+          .role-info span {
+            color: white;
+          }
+
+          .role-badge {
+            font-size: 0.75rem;
+            padding: 5px 10px;
+            border-radius: 16px;
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            font-weight: 600;
+          }
+
+          .button-group {
+            gap: 8px;
+            padding: 10px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+            background: white;
+            border-radius: 6px;
+            border: 1px solid #e2e8f0;
+          }
+
+          .btn-mode {
+            padding: 8px 14px;
+            font-size: 0.8rem;
+            border-radius: 5px;
+            font-weight: 600;
+            min-height: 36px;
+            flex: 1;
+            min-width: 100px;
+          }
+
+          .status-table {
+            font-size: 0.57rem;
+            border-collapse: collapse;
+            line-height: 1.1;
+          }
+
+          .status-table th,
+          .status-table td {
+            padding: 1px 0.5px;
+            font-size: 0.57rem;
+            border: 0.5px solid #cbd5e1;
+            text-align: center;
+            height: auto;
+          }
+
+          .status-table th {
+            font-size: 0.57rem;
+            padding: 1.5px 0.5px;
+            background: #f1f5f9;
+            color: #334155;
+            font-weight: 600;
+          }
+
+          .col-machine {
+            min-width: 48px;
+          }
+          
+          .col-kind {
+            min-width: 45px;
+          }
+
+          .col-size {
+            min-width: 30px;
+          }
+
+          .col-shift,
+          .col-waktu,
+          .col-standard {
+            min-width: 38px;
+          }
+
+          .col-checkpoint {
+            min-width: 70px;
+            font-size: 0.64rem;
+          }
+
+          .col-date-cell {
+            min-width: 24px;
+            height: auto;
+            padding: 1px;
+          }
+
+          .status-dropdown {
+            font-size: 0.68rem;
+            padding: 1px;
+            line-height: 1.1;
+            border-radius: 3px;
+            border: 0.5px solid #cbd5e1;
+          }
+
+          .status-badge {
+            font-size: 0.68rem;
+            padding: 1px 2px;
+            border-radius: 3px;
+            font-weight: 600;
+          }
+
+          /* Modal responsive */
+          .ng-modal-overlay {
+            padding: 12px;
+          }
+
+          .ng-modal {
+            width: 96%;
+            max-width: 100%;
+            padding: 16px;
+            border-radius: 8px;
+            background: white;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+            border: 1px solid #e2e8f0;
+          }
+
+          .ng-modal h3 {
+            font-size: 0.95rem;
+            margin-bottom: 12px;
+            font-weight: 700;
+            color: #0f172a;
+          }
+
+          .ng-form-group {
+            margin-bottom: 8px;
+          }
+
+          .ng-form-group label {
+            font-size: 0.75rem;
+            margin-bottom: 3px;
+          }
+
+          .ng-form-group textarea,
+          .ng-form-group select {
+            font-size: 0.7rem;
+            padding: 4px;
+          }
+
+          .ng-modal-actions {
+            gap: 6px;
+          }
+
+          .ng-modal-actions button {
+            padding: 5px 10px;
+            font-size: 0.75rem;
+          }
+        }
+
+        @media (max-width: 480px) {
+          .page-content {
+            padding: 6px 4px;
+            background: #fafbfc;
+          }
+
+          .header {
+            padding: 7px 7px;
+            margin-bottom: 6px;
+            gap: 4px;
+          }
+
+          .header h1 {
+            font-size: 0.7rem;
+            line-height: 1;
+          }
+
+          .month-nav {
+            gap: 3px;
+            padding: 4px;
+            margin-bottom: 6px;
+          }
+
+          .month-btn {
+            padding: 3px 5px;
+            font-size: 0.55rem;
+            min-height: 24px;
+          }
+
+          .month-display {
+            font-size: 0.65rem;
+            min-width: 70px;
+          }
+
+          .dropdown-group select {
+            padding: 4px 7px;
+            font-size: 0.65rem;
+            min-height: 28px;
+            border: 1px solid #cbd5e1;
+          }
+
+          .header {
+            padding: 14px;
+            gap: 12px;
+            margin-bottom: 14px;
+            border-radius: 8px;
+            background: #1976d2;
+            color: white;
+            flex-direction: column;
+            align-items: flex-start;
+          }
+
+          .header h1 {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: white;
+            margin-bottom: 8px;
+          }
+
+          .role-info {
+            font-size: 0.8rem;
+            gap: 8px;
+            margin-bottom: 8px;
+            flex-wrap: wrap;
+            color: white;
+          }
+
+          .role-info span {
+            color: white;
+          }
+
+          .role-badge {
+            font-size: 0.75rem;
+            padding: 5px 12px;
+            border-radius: 18px;
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            font-weight: 600;
+          }
+
+          .button-group {
+            gap: 8px;
+            padding: 12px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+            background: #f5f5f5;
+            border-radius: 8px;
+            width: 100%;
+          }
+
+          .btn-mode {
+            padding: 10px 16px;
+            font-size: 0.8rem;
+            border-radius: 6px;
+            font-weight: 600;
+            min-height: 40px;
+            flex: 1;
+            min-width: 100px;
+            text-align: center;
+          }
+
+          .month-header {
+            font-size: 0.95rem;
+            padding: 8px 0;
+            font-weight: 700;
+          }
+
+          .week-header {
+            font-size: 0.85rem;
+            padding: 6px 0;
+            font-weight: 600;
+          }
+
+          .status-table {
+            font-size: 0.66rem;
+            border-collapse: collapse;
+            line-height: 1.2;
+          }
+
+          .status-table th,
+          .status-table td {
+            padding: 2px 1px;
+            font-size: 0.66rem;
+            border: 0.5px solid #cbd5e1;
+            text-align: center;
+            height: auto;
+          }
+
+          .status-table th {
+            font-size: 0.66rem;
+            padding: 3px 1px;
+            font-weight: 600;
+            background: #f1f5f9;
+            color: #334155;
+          }
+
+          .col-machine {
+            min-width: 50px;
+          }
+          
+          .col-kind {
+            min-width: 46px;
+          }
+
+          .col-size {
+            min-width: 32px;
+          }
+
+          .col-shift,
+          .col-waktu,
+          .col-standard {
+            min-width: 40px;
+          }
+
+          .col-checkpoint {
+            min-width: 72px;
+            font-size: 0.62rem;
+            text-align: left;
+          }
+
+          .col-date-cell {
+            min-width: 24px;
+            height: auto;
+            padding: 1px;
+          }
+
+          .status-dropdown {
+            font-size: 0.66rem;
+            padding: 1px 1px;
+            line-height: 1.1;
+            border-radius: 3px;
+            border: 0.5px solid #cbd5e1;
+          }
+
+          .status-badge {
+            font-size: 0.66rem;
+            padding: 1px 2px;
+            border-radius: 3px;
+            font-weight: 600;
+          }
+
+          /* Modal responsive */
+          .ng-modal-overlay {
+            padding: 12px;
+          }
+
+          .ng-modal {
+            width: 96%;
+            max-width: 100%;
+            padding: 16px;
+            border-radius: 8px;
+            background: white;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+          }
+
+          .ng-modal h3 {
+            font-size: 0.95rem;
+            margin-bottom: 12px;
+            font-weight: 700;
+            color: #1e293b;
+          }
+
+          .ng-form-group {
+            margin-bottom: 12px;
+          }
+
+          .ng-form-group label {
+            font-size: 0.8rem;
+            margin-bottom: 6px;
+            display: block;
+            font-weight: 600;
+            color: #334155;
+          }
+
+          .ng-form-group textarea,
+          .ng-form-group select {
+            font-size: 0.8rem;
+            padding: 10px;
+            line-height: 1.4;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            width: 100%;
+            min-height: 40px;
+          }
+
+          .ng-modal-actions {
+            gap: 10px;
+            display: flex;
+            margin-top: 16px;
+          }
+
+          .ng-modal-actions button {
+            padding: 10px 16px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            border-radius: 6px;
+            min-height: 40px;
+            flex: 1;
+          }
+        }
+
+        @media (max-width: 414px) {
+          .page-content {
+            padding-left: 10px;
+            padding-top: 10px;
+            padding-right: 10px;
+            padding-bottom: 10px;
+            max-width: 100%;
+            width: 100%;
+          }
+
+          .header {
+            padding: 12px;
+            gap: 10px;
+            margin-bottom: 12px;
+            border-radius: 6px;
+          }
+
+          .header h1 {
+            font-size: 1rem;
+            margin-bottom: 6px;
+          }
+
+          .role-info {
+            font-size: 0.75rem;
+            gap: 6px;
+            margin-bottom: 6px;
+            flex-wrap: wrap;
+          }
+
+          .role-badge {
+            font-size: 0.7rem;
+            padding: 4px 10px;
+            border-radius: 16px;
+          }
+
+          .button-group {
+            gap: 6px;
+            padding: 10px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+            border-radius: 6px;
+            width: 100%;
+          }
+
+          .btn-mode {
+            padding: 9px 14px;
+            font-size: 0.75rem;
+            border-radius: 5px;
+            min-height: 36px;
+            flex: 1;
+            min-width: 90px;
+          }
+
+          .month-header {
+            font-size: 0.9rem;
+            padding: 6px 0;
+          }
+
+          .week-header {
+            font-size: 0.8rem;
+            padding: 4px 0;
+          }
+
+          .status-table {
+            font-size: 0.64rem;
+            line-height: 1.2;
+          }
+
+          .status-table th,
+          .status-table td {
+            padding: 2px 1px;
+            font-size: 0.64rem;
+            border: 0.5px solid #cbd5e1;
+            height: auto;
+          }
+
+          .status-table th {
+            font-size: 0.64rem;
+            padding: 3px 1px;
+            background: #f1f5f9;
+            color: #334155;
+            font-weight: 600;
+          }
+
+          .col-machine {
+            min-width: 46px;
+          }
+          
+          .col-kind {
+            min-width: 44px;
+          }
+
+          .col-size {
+            min-width: 30px;
+          }
+
+          .col-shift,
+          .col-waktu,
+          .col-standard {
+            min-width: 36px;
+          }
+
+          .col-checkpoint {
+            min-width: 68px;
+            font-size: 0.60rem;
+          }
+
+          .col-date-cell {
+            min-width: 24px;
+            height: 24px;
+            padding: 1px;
+          }
+
+          .status-dropdown {
+            font-size: 0.64rem;
+            padding: 1px 1px;
+            line-height: 1.1;
+            border-radius: 3px;
+            border: 0.5px solid #cbd5e1;
+          }
+
+          .status-badge {
+            font-size: 0.64rem;
+            padding: 1px 2px;
+            border-radius: 3px;
+            font-weight: 600;
+          }
+
+          /* Modal responsive */
+          .ng-modal-overlay {
+            padding: 10px;
+          }
+
+          .ng-modal {
+            width: 96%;
+            max-width: 100%;
+            padding: 14px;
+            border-radius: 6px;
+          }
+
+          .ng-modal h3 {
+            font-size: 0.9rem;
+            margin-bottom: 10px;
+            font-weight: 700;
+          }
+
+          .ng-form-group {
+            margin-bottom: 10px;
+          }
+
+          .ng-form-group label {
+            font-size: 0.75rem;
+            margin-bottom: 4px;
+            font-weight: 600;
+          }
+
+          .ng-form-group textarea,
+          .ng-form-group select {
+            font-size: 0.75rem;
+            padding: 8px;
+            line-height: 1.3;
+            min-height: 36px;
+          }
+
+          .ng-modal-actions {
+            gap: 8px;
+            margin-top: 12px;
+          }
+
+          .ng-modal-actions button {
+            padding: 8px 12px;
+            font-size: 0.8rem;
+            min-height: 36px;
+          }
+        }
       `}</style>
     </>
   )
