@@ -159,6 +159,7 @@ export default function FinalAssyStatusPage() {
   const [activeMonth, setActiveMonth] = useState(new Date().getMonth());
   const [activeYear, setActiveYear] = useState(new Date().getFullYear());
   const [selectedArea, setSelectedArea] = useState<string>(() => DEFAULT_AREA_BY_CATEGORY["final-assy-inspector"] || "");
+  const [selectedAreaId, setSelectedAreaId] = useState<number | undefined>();
   const [selectedCarline, setSelectedCarline] = useState<string>("");
   const [selectedLine, setSelectedLine] = useState<string>("");
 
@@ -535,6 +536,34 @@ export default function FinalAssyStatusPage() {
     }
   };
 
+  // Load area_id when selectedArea changes and reset carline/line
+  useEffect(() => {
+    if (!selectedArea) return;
+    
+    // Reset carline and line when area changes
+    setSelectedCarline("");
+    setSelectedLine("");
+    
+    const loadAreaId = async () => {
+      try {
+        const res = await fetch(`/api/areas/get-by-category?categoryCode=${encodeURIComponent(categoryCode)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && data.areas) {
+            const area = data.areas.find((a: AreaOption) => a.area_code === selectedArea);
+            if (area) {
+              setSelectedAreaId(area.id);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error loading area_id:', error);
+      }
+    };
+    
+    loadAreaId();
+  }, [selectedArea, categoryCode]);
+
   useEffect(() => {
     if (!user?.id || !selectedArea) return;
     loadDataFromDB();
@@ -744,6 +773,8 @@ export default function FinalAssyStatusPage() {
       onCarlineChange={setSelectedCarline}
       onLineChange={setSelectedLine}
       isLoading={isLoading}
+      areaId={selectedAreaId}
+      selectedArea={selectedArea}
     />
   </div>
 

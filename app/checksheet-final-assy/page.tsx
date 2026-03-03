@@ -89,18 +89,28 @@ export default function ChecksheetFinalAssyPage() {
   // ===== LOAD CARLINE/LINE HISTORY =====
   useEffect(() => {
     const loadCarlineLineHistory = async () => {
+      if (!effectiveAreaCode) return;
       try {
-        const res = await fetch('/api/final-assy/get-carline-line');
+        // Extract area_id from area code format: "final-assy-insp-26" or "final-assy-gl-26"
+        const parts = effectiveAreaCode.split('-');
+        const areaId = parts[parts.length - 1];
+        
+        if (!areaId || isNaN(Number(areaId))) {
+          console.error('Invalid area code format:', effectiveAreaCode);
+          return;
+        }
+        
+        const res = await fetch(`/api/final-assy/get-carline-line?areaId=${areaId}`);
         if (res.ok) {
           const data = await res.json();
-          setCarlineLineHistory(data);
+          setCarlineLineHistory(Array.isArray(data) ? data : []);
         }
       } catch (err) {
         console.error('Error loading carline/line history:', err);
       }
     };
     loadCarlineLineHistory();
-  }, []);
+  }, [effectiveAreaCode]);
 
   // ===== GET AREA FROM URL PARAMS =====
   useEffect(() => {
@@ -239,10 +249,16 @@ export default function ChecksheetFinalAssyPage() {
       console.log(`💾 Saving checklist: dateKey=${dateKey}, category=${categoryCode}, area=${effectiveAreaCode}, carline=${carline}, line=${line}`);
 
       // Save carline/line history
+      const categoryCode = checklistType === "group-leader" ? "final-assy-gl" : "final-assy-inspector";
       await fetch("/api/final-assy/save-carline-line", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ carline, line }),
+        body: JSON.stringify({ 
+          carline, 
+          line,
+          userId: user.id,
+          categoryCode,
+        }),
       });
 
       await Promise.all(
@@ -384,6 +400,7 @@ export default function ChecksheetFinalAssyPage() {
           line={line}
           setLine={setLine}
           history={carlineLineHistory}
+          areaCode={effectiveAreaCode}
         />
 
         {isLoading ? (

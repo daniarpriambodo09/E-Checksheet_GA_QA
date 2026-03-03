@@ -8,13 +8,27 @@ interface CarlineLine {
 
 export async function GET(request: NextRequest) {
   try {
-    // Fetch all unique carline-line combinations from history
+    const { searchParams } = new URL(request.url);
+    const areaId = searchParams.get('areaId');
+    const categoryCode = searchParams.get('categoryCode');
+
+    if (!areaId) {
+      return NextResponse.json(
+        { error: 'areaId is required' },
+        { status: 400 }
+      );
+    }
+
+    // Fetch unique carline-line combinations from checklist_results for specific area
+    // This ensures we only show carline/line that have been used in that area
     const results = await executeQuery<CarlineLine>(
       `SELECT DISTINCT carline, line 
-       FROM carline_line_mapping 
-       WHERE carline IS NOT NULL AND line IS NOT NULL
+       FROM checklist_results 
+       WHERE area_id = $1 
+         AND carline IS NOT NULL 
+         AND line IS NOT NULL
        ORDER BY carline ASC, line ASC`,
-      []
+      [parseInt(areaId)]
     );
 
     return NextResponse.json(results);

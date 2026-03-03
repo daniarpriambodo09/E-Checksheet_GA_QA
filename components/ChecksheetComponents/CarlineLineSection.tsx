@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 interface CarlineLineSectionProps {
   carline: string;
@@ -8,6 +8,8 @@ interface CarlineLineSectionProps {
   line: string;
   setLine: (value: string) => void;
   history: Array<{ carline: string; line: string }>;
+  areaId?: number;
+  areaCode?: string;
 }
 
 export default function CarlineLineSection({
@@ -16,21 +18,42 @@ export default function CarlineLineSection({
   line,
   setLine,
   history,
+  areaId,
+  areaCode,
 }: CarlineLineSectionProps) {
   const [showCarlineDropdown, setShowCarlineDropdown] = useState(false);
   const [showLineDropdown, setShowLineDropdown] = useState(false);
+  const [areaHistory, setAreaHistory] = useState<Array<{ carline: string; line: string }>>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+
+  // Load history for specific area
+  useEffect(() => {
+    if (areaId) {
+      setIsLoadingHistory(true);
+      fetch(`/api/final-assy/get-carline-line?areaId=${areaId}`)
+        .then(res => res.json())
+        .then(data => {
+          setAreaHistory(Array.isArray(data) ? data : []);
+        })
+        .catch(err => console.error('Error loading area carline/line history:', err))
+        .finally(() => setIsLoadingHistory(false));
+    }
+  }, [areaId]);
+
+  // Use area-specific history if available, otherwise fallback to passed history
+  const effectiveHistory = areaHistory.length > 0 ? areaHistory : history;
 
   // Get unique carlines and corresponding lines
-  const uniqueCarlines = Array.from(new Set(history.map(h => h.carline))).sort();
+  const uniqueCarlines = Array.from(new Set(effectiveHistory.map(h => h.carline))).sort();
   const linesForCarline = carline
-    ? Array.from(new Set(history.filter(h => h.carline === carline).map(h => h.line))).sort()
+    ? Array.from(new Set(effectiveHistory.filter(h => h.carline === carline).map(h => h.line))).sort()
     : [];
 
   const handleCarlineSelect = (selectedCarline: string) => {
     setCarline(selectedCarline);
     setShowCarlineDropdown(false);
     // Auto-select first available line if exists
-    const availableLines = history.filter(h => h.carline === selectedCarline);
+    const availableLines = effectiveHistory.filter(h => h.carline === selectedCarline);
     if (availableLines.length > 0 && !line) {
       setLine(availableLines[0].line);
     }

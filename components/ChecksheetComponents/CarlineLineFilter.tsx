@@ -13,6 +13,8 @@ interface CarlineLineFilterProps {
   onCarlineChange: (carline: string) => void;
   onLineChange: (line: string) => void;
   isLoading?: boolean;
+  areaId?: number;
+  selectedArea?: string;
 }
 
 export default function CarlineLineFilter({
@@ -21,29 +23,39 @@ export default function CarlineLineFilter({
   onCarlineChange,
   onLineChange,
   isLoading = false,
+  areaId,
+  selectedArea,
 }: CarlineLineFilterProps) {
   const [history, setHistory] = useState<CarlineLineOption[]>([]);
   const [isFetching, setIsFetching] = useState(false);
 
-  // Fetch history on mount
+  // Fetch history when area changes
   useEffect(() => {
     const fetchHistory = async () => {
+      if (!areaId) {
+        setHistory([]);
+        return;
+      }
+
       setIsFetching(true);
       try {
-        const res = await fetch("/api/final-assy/get-carline-line");
+        const res = await fetch(`/api/final-assy/get-carline-line?areaId=${areaId}`);
         if (res.ok) {
           const data = await res.json();
           setHistory(Array.isArray(data) ? data : []);
+        } else {
+          setHistory([]);
         }
       } catch (error) {
         console.error("Failed to fetch carline/line history:", error);
+        setHistory([]);
       } finally {
         setIsFetching(false);
       }
     };
 
     fetchHistory();
-  }, []);
+  }, [areaId]);
 
   // Get unique carlines from history
   const uniqueCarlines = Array.from(
