@@ -32,30 +32,23 @@ export async function GET(request: NextRequest) {
     if (type === 'inspector') {
       const categories = await executeQuery<{ id: number }>(
         'SELECT id FROM checklist_categories WHERE category_code = $1',
-        ['final-assy-inspector']  // ✅ Category untuk Inspector
+        ['final-assy-inspector']
       );
-      
       if (categories.length === 0) {
         return NextResponse.json({ error: 'Category not found' }, { status: 404 });
       }
       categoryId = categories[0].id;
-      
-    } else if (type === 'group-leader') {
-      // ✅ TAMBAHKAN SUPPORT UNTUK GROUP LEADER
+    } else if (type === 'group-leader') {  // ✅ TAMBAHKAN INI
       const categories = await executeQuery<{ id: number }>(
         'SELECT id FROM checklist_categories WHERE category_code = $1',
-        ['final-assy-gl']  // ✅ Category untuk Group Leader
+        ['final-assy-gl']
       );
-      
       if (categories.length === 0) {
         return NextResponse.json({ error: 'Category not found' }, { status: 404 });
       }
       categoryId = categories[0].id;
-      
     } else {
-      return NextResponse.json({ 
-        error: `Invalid type: ${type}. Expected 'inspector' or 'group-leader'` 
-      }, { status: 400 });
+      return NextResponse.json({ error: 'Invalid type' }, { status: 400 });
     }
 
     // ✅ Ambil data dari database dengan category_id yang sesuai

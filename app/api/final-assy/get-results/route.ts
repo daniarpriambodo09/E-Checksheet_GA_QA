@@ -9,24 +9,27 @@ export async function GET(request: NextRequest) {
     const categoryCode = searchParams.get('categoryCode');
     const month = searchParams.get('month');
     const role = searchParams.get('role');
-    const areaCode = searchParams.get('areaCode'); // ✅ Ambil areaCode
+    const areaCode = searchParams.get('areaCode');
 
     if (!userId || !categoryCode || !month) {
-      return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'Missing required parameters: userId, categoryCode, month' },
+        { status: 400 }
+      );
     }
 
-    // Validasi user
+    // 1. Validasi user
     const users = await pool.query(
-      'SELECT id, username, full_name, nik, department, role FROM users WHERE id = $1 AND is_active = TRUE',
+      `SELECT id FROM users WHERE id = $1 AND is_active = TRUE`,
       [userId]
     );
     if (users.rows.length === 0) {
       return NextResponse.json({ error: 'Invalid user' }, { status: 403 });
     }
 
-    // Ambil category_id
+    // 2. Ambil category_id — untuk filter checklist_results
     const categories = await pool.query(
-      'SELECT id FROM checklist_categories WHERE category_code = $1',
+      `SELECT id FROM checklist_categories WHERE category_code = $1`,
       [categoryCode]
     );
     if (categories.rows.length === 0) {
@@ -34,103 +37,115 @@ export async function GET(request: NextRequest) {
     }
     const categoryId = categories.rows[0].id;
 
-    // ✅ BUILD QUERY DENGAN FILTER AREA
-    let query = '';
-    let queryParams: any[] = [];
+    // 3. Resolve area_id
+    // GL dan Inspector punya area terpisah di DB dengan area_code berbeda:
+    //   GL:        "final-assy-gl-genba-a-mazda"       → area_id=1
+    //   Inspector: "final-assy-insp-genba-a-mazda"     → area_id=5
+    // Cari area berdasarkan area_code + category_id agar dapat area yang tepat.
+    // Fallback: jika tidak ketemu dengan category filter, cari tanpa filter (backward compat).
     let areaId: number | null = null;
-
-    // Resolve area_id dari areaCode
     if (areaCode) {
-      const areaResult = await pool.query(
-        `SELECT id FROM checklist_areas 
-         WHERE area_code = $1 AND category_id = $2 AND is_active = TRUE`,
+      // Coba dulu dengan category_id (paling tepat)
+      let areaResult = await pool.query(
+        `SELECT id FROM checklist_areas
+         WHERE area_code = $1 AND category_id = $2 AND is_active = TRUE
+         LIMIT 1`,
         [areaCode, categoryId]
       );
+
+      // Fallback: cari tanpa category filter (untuk backward compatibility)
+      if (areaResult.rows.length === 0) {
+        areaResult = await pool.query(
+          `SELECT id FROM checklist_areas
+           WHERE area_code = $1 AND is_active = TRUE
+           ORDER BY id ASC
+           LIMIT 1`,
+          [areaCode]
+        );
+      }
+
       if (areaResult.rows.length > 0) {
         areaId = areaResult.rows[0].id;
+        console.log('✅ [Get Results] Area resolved:', { areaCode, areaId, categoryId });
+      } else {
+        console.warn('⚠️ [Get Results] Area not found:', areaCode);
+        return NextResponse.json({
+          success: true,
+          formatted: {},
+          count: 0,
+          warning: `Area not found: ${areaCode}`
+        });
       }
     }
 
-    // Tentukan query berdasarkan role dan area
+    // 4. Build query
+    // Filter ketat: area_id = $n (exact match, tanpa OR area_id IS NULL)
+    const selectCols = `
+      r.date_key, r.item_id, r.shift, r.status,
+      r.ng_description, r.ng_department,
+      r.submitted_at, r.user_id, r.nik,
+      u.full_name, r.area_id
+    `;
+
+    let query = '';
+    let queryParams: any[] = [];
+
+    // Logika query berdasarkan categoryCode dan role:
+    //
+    // CASE 1: categoryCode=final-assy-inspector (siapapun role-nya)
+    //   → Tampilkan SEMUA data inspector di area tersebut (semua user_id)
+    //   → Alasan: GL bisa mengisi checklist inspector atas nama area,
+    //     sehingga inspector yang login harus bisa melihat data yang diisi GL
+    //
+    // CASE 2: categoryCode=final-assy-gl
+    //   → Tampilkan data GL milik user yang login saja (user_id = userId)
+    //   → Alasan: GL checklist bersifat personal per GL
+    //
     if (categoryCode === 'final-assy-inspector') {
-      if (role === 'group-leader-qa') {
-        // Group-leader: lihat SEMUA data inspector
-        if (areaId) {
-          query = `
-            SELECT r.date_key, r.item_id, r.shift, r.status, r.ng_description, 
-                   r.ng_department, r.submitted_at, r.user_id, r.nik, u.full_name, r.area_id
-            FROM checklist_results r
-            LEFT JOIN users u ON r.user_id = u.id
-            WHERE r.category_id = $1 
-              AND r.date_key LIKE $2
-              AND COALESCE(r.area_id, -1) = $3  -- ✅ Filter by area_id
-            ORDER BY r.date_key, r.item_id, r.shift
-          `;
-          queryParams = [categoryId, `${month}%`, areaId];
-        } else {
-          query = `
-            SELECT r.date_key, r.item_id, r.shift, r.status, r.ng_description, 
-                   r.ng_department, r.submitted_at, r.user_id, r.nik, u.full_name, r.area_id
-            FROM checklist_results r
-            LEFT JOIN users u ON r.user_id = u.id
-            WHERE r.category_id = $1 
-              AND r.date_key LIKE $2
-            ORDER BY r.date_key, r.item_id, r.shift
-          `;
-          queryParams = [categoryId, `${month}%`];
-        }
-      } else {
-        // Inspector: hanya data sendiri
-        if (areaId) {
-          query = `
-            SELECT r.date_key, r.item_id, r.shift, r.status, r.ng_description, 
-                   r.ng_department, r.submitted_at, r.user_id, r.nik, u.full_name, r.area_id
-            FROM checklist_results r
-            LEFT JOIN users u ON r.user_id = u.id
-            WHERE r.user_id = $1 
-              AND r.category_id = $2 
-              AND r.date_key LIKE $3
-              AND COALESCE(r.area_id, -1) = $4  -- ✅ Filter by area_id
-            ORDER BY r.date_key, r.item_id, r.shift
-          `;
-          queryParams = [userId, categoryId, `${month}%`, areaId];
-        } else {
-          query = `
-            SELECT r.date_key, r.item_id, r.shift, r.status, r.ng_description, 
-                   r.ng_department, r.submitted_at, r.user_id, r.nik, u.full_name, r.area_id
-            FROM checklist_results r
-            LEFT JOIN users u ON r.user_id = u.id
-            WHERE r.user_id = $1 
-              AND r.category_id = $2 
-              AND r.date_key LIKE $3
-            ORDER BY r.date_key, r.item_id, r.shift
-          `;
-          queryParams = [userId, categoryId, `${month}%`];
-        }
-      }
-    } else {
-      // Group Leader table
-      if (areaId) {
+      // Semua user bisa melihat data inspector di area ini (GL maupun Inspector)
+      if (areaId !== null) {
         query = `
-          SELECT r.date_key, r.item_id, r.shift, r.status, r.ng_description, 
-                 r.ng_department, r.submitted_at, r.user_id, r.nik, u.full_name, r.area_id
+          SELECT ${selectCols}
           FROM checklist_results r
           LEFT JOIN users u ON r.user_id = u.id
-          WHERE r.user_id = $1 
-            AND r.category_id = $2 
+          WHERE r.category_id = $1
+            AND r.date_key LIKE $2
+            AND r.area_id = $3
+          ORDER BY r.date_key, r.item_id, r.shift
+        `;
+        queryParams = [categoryId, `${month}%`, areaId];
+      } else {
+        query = `
+          SELECT ${selectCols}
+          FROM checklist_results r
+          LEFT JOIN users u ON r.user_id = u.id
+          WHERE r.category_id = $1
+            AND r.date_key LIKE $2
+          ORDER BY r.date_key, r.item_id, r.shift
+        `;
+        queryParams = [categoryId, `${month}%`];
+      }
+    } else {
+      // GL melihat data GL miliknya sendiri (user_id filter)
+      if (areaId !== null) {
+        query = `
+          SELECT ${selectCols}
+          FROM checklist_results r
+          LEFT JOIN users u ON r.user_id = u.id
+          WHERE r.user_id = $1
+            AND r.category_id = $2
             AND r.date_key LIKE $3
-            AND COALESCE(r.area_id, -1) = $4  -- ✅ Filter by area_id
+            AND r.area_id = $4
           ORDER BY r.date_key, r.item_id, r.shift
         `;
         queryParams = [userId, categoryId, `${month}%`, areaId];
       } else {
         query = `
-          SELECT r.date_key, r.item_id, r.shift, r.status, r.ng_description, 
-                 r.ng_department, r.submitted_at, r.user_id, r.nik, u.full_name, r.area_id
+          SELECT ${selectCols}
           FROM checklist_results r
           LEFT JOIN users u ON r.user_id = u.id
-          WHERE r.user_id = $1 
-            AND r.category_id = $2 
+          WHERE r.user_id = $1
+            AND r.category_id = $2
             AND r.date_key LIKE $3
           ORDER BY r.date_key, r.item_id, r.shift
         `;
@@ -138,14 +153,15 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Eksekusi query
     const results = await pool.query(query, queryParams);
+    console.log(`✅ [Get Results] Found ${results.rows.length} results | category=${categoryCode} area_id=${areaId} role=${role}`);
 
-    // Format response
+    // 5. Format response
     const formatted: Record<string, Record<string, any>> = {};
     results.rows.forEach((row: any) => {
       if (!formatted[row.date_key]) formatted[row.date_key] = {};
-      formatted[row.date_key][`${row.item_id}-${row.shift}`] = {
+      const itemKey = `${row.item_id}-${row.shift}`;
+      formatted[row.date_key][itemKey] = {
         status: row.status,
         ngCount: row.status === 'NG' ? 1 : 0,
         items: [],
@@ -154,7 +170,7 @@ export async function GET(request: NextRequest) {
         submittedBy: row.full_name || row.user_id || 'System',
         ngDescription: row.ng_description || '',
         ngDepartment: row.ng_department || 'QA',
-        areaId: row.area_id  // ✅ Include areaId di response
+        areaId: row.area_id,
       };
     });
 
@@ -164,11 +180,26 @@ export async function GET(request: NextRequest) {
       count: results.rows.length,
       role,
       categoryCode,
-      areaId
+      areaCode: areaCode || null,
+      areaId,
     });
 
   } catch (error) {
-    console.error('❌ Get results error:', error);
-    return NextResponse.json({ error: 'Server error' }, { status: 500 });
+    console.error('❌ [Get Results] Error:', error);
+    return NextResponse.json(
+      { error: 'Server error', details: error instanceof Error ? error.message : 'Unknown error' },
+      { status: 500 }
+    );
   }
+}
+
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    },
+  });
 }
