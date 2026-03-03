@@ -5,6 +5,7 @@ import { useAuth } from "@/lib/auth-context";
 import React from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { ScanGaugeButton } from "@/components/ScanGaugeButton";
+import CarlineLineFilter from "@/components/ChecksheetComponents/CarlineLineFilter";
 
 // =====================================================================
 // === TYPE DEFINITIONS ===
@@ -158,6 +159,8 @@ export default function FinalAssyStatusPage() {
   const [activeMonth, setActiveMonth] = useState(new Date().getMonth());
   const [activeYear, setActiveYear] = useState(new Date().getFullYear());
   const [selectedArea, setSelectedArea] = useState<string>(() => DEFAULT_AREA_BY_CATEGORY["final-assy-inspector"] || "");
+  const [selectedCarline, setSelectedCarline] = useState<string>("");
+  const [selectedLine, setSelectedLine] = useState<string>("");
 
   // ✅ FIX: checkpoints GL dari DB
   const [checkpoints, setCheckpoints] = useState<CheckPoint[]>([]);
@@ -498,11 +501,13 @@ export default function FinalAssyStatusPage() {
     try {
       const monthKey = `${activeYear}-${String(activeMonth + 1).padStart(2, "0")}`;
       const areaParam = selectedArea ? `&areaCode=${encodeURIComponent(selectedArea)}` : "";
+      const carlineParam = selectedCarline ? `&carline=${encodeURIComponent(selectedCarline)}` : "";
+      const lineParam = selectedLine ? `&line=${encodeURIComponent(selectedLine)}` : "";
 
       if (showGroupLeaderTable) {
         const [resultsRes, signaturesRes] = await Promise.all([
-          fetch(`/api/final-assy/get-results?userId=${user.id}&categoryCode=final-assy-gl&month=${monthKey}&role=${currentRole}${areaParam}`),
-          fetch(`/api/final-assy/get-signatures?userId=${user.id}&categoryCode=final-assy-gl&month=${monthKey}&role=${currentRole}${areaParam}`),
+          fetch(`/api/final-assy/get-results?userId=${user.id}&categoryCode=final-assy-gl&month=${monthKey}&role=${currentRole}${areaParam}${carlineParam}${lineParam}`),
+          fetch(`/api/final-assy/get-signatures?userId=${user.id}&categoryCode=final-assy-gl&month=${monthKey}&role=${currentRole}${areaParam}${carlineParam}${lineParam}`),
         ]);
         if (!resultsRes.ok || !signaturesRes.ok) throw new Error("Gagal memuat data dari server");
         const resultsData = await resultsRes.json();
@@ -513,8 +518,8 @@ export default function FinalAssyStatusPage() {
 
       if (showInspectorTable) {
         const [resultsRes, signaturesRes] = await Promise.all([
-          fetch(`/api/final-assy/get-results?userId=${user.id}&categoryCode=final-assy-inspector&month=${monthKey}&role=${currentRole}${areaParam}`),
-          fetch(`/api/final-assy/get-signatures?userId=${user.id}&categoryCode=final-assy-inspector&month=${monthKey}&role=${currentRole}${areaParam}`),
+          fetch(`/api/final-assy/get-results?userId=${user.id}&categoryCode=final-assy-inspector&month=${monthKey}&role=${currentRole}${areaParam}${carlineParam}${lineParam}`),
+          fetch(`/api/final-assy/get-signatures?userId=${user.id}&categoryCode=final-assy-inspector&month=${monthKey}&role=${currentRole}${areaParam}${carlineParam}${lineParam}`),
         ]);
         if (!resultsRes.ok || !signaturesRes.ok) throw new Error("Gagal memuat data inspector dari server");
         const resultsData = await resultsRes.json();
@@ -533,7 +538,7 @@ export default function FinalAssyStatusPage() {
   useEffect(() => {
     if (!user?.id || !selectedArea) return;
     loadDataFromDB();
-  }, [user?.id, activeMonth, activeYear, viewAs, selectedArea]);
+  }, [user?.id, activeMonth, activeYear, viewAs, selectedArea, selectedCarline, selectedLine];
 
   // ===== DYNAMIC DATES =====
   const dynamicDates = useMemo(() => {
@@ -724,16 +729,23 @@ export default function FinalAssyStatusPage() {
           </div>
         </div>
 
-        {/* AREA FILTER */}
-        <div className="filter-area">
-          <AreaFilter
-            categoryCode={categoryCode}
-            selectedArea={selectedArea}
-            onAreaChange={setSelectedArea}
-            isLoading={isLoading}
-            defaultAreaCode={DEFAULT_AREA_BY_CATEGORY[categoryCode]}
-          />
-        </div>
+  {/* AREA, CARLINE, LINE FILTERS */}
+  <div className="filter-area" style={{ display: "flex", alignItems: "center", gap: "24px", flexWrap: "wrap", justifyContent: "space-between" }}>
+    <AreaFilter
+      categoryCode={categoryCode}
+      selectedArea={selectedArea}
+      onAreaChange={setSelectedArea}
+      isLoading={isLoading}
+      defaultAreaCode={DEFAULT_AREA_BY_CATEGORY[categoryCode]}
+    />
+    <CarlineLineFilter
+      selectedCarline={selectedCarline}
+      selectedLine={selectedLine}
+      onCarlineChange={setSelectedCarline}
+      onLineChange={setSelectedLine}
+      isLoading={isLoading}
+    />
+  </div>
 
         {/* INFO BOX */}
         <div style={{ backgroundColor: "#e3f2fd", border: "1px solid #90caf9", borderRadius: "8px", padding: "12px 16px", marginBottom: "20px" }}>

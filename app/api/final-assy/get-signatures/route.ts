@@ -30,6 +30,8 @@ export async function GET(request: NextRequest) {
     const month = searchParams.get('month');
     const role = searchParams.get('role');
     const areaCode = searchParams.get('areaCode');
+    const carline = searchParams.get('carline');
+    const line = searchParams.get('line');
 
     if (!userId || !categoryCode || !month) {
       return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
@@ -75,53 +77,66 @@ export async function GET(request: NextRequest) {
 
     if (categoryCode === 'final-assy-inspector') {
       // === TABEL INSPECTOR ===
+      let whereConditions = [
+        's.user_id = $1',
+        's.category_id = $2',
+        's.date_key LIKE $3'
+      ];
+      queryParams = [userId, categoryId, `${month}%`];
+      let paramCount = 3;
+
       if (areaId !== null) {
-        query = `
-          SELECT s.date_key, s.shift, s.signature_status, s.area_id
-          FROM checklist_signatures s
-          WHERE s.user_id = $1 
-            AND s.category_id = $2 
-            AND s.date_key LIKE $3
-            AND (s.area_id = $4 OR s.area_id IS NULL)
-          ORDER BY s.date_key, s.shift
-        `;
-        queryParams = [userId, categoryId, `${month}%`, areaId];
-      } else {
-        query = `
-          SELECT s.date_key, s.shift, s.signature_status, s.area_id
-          FROM checklist_signatures s
-          WHERE s.user_id = $1 
-            AND s.category_id = $2 
-            AND s.date_key LIKE $3
-          ORDER BY s.date_key, s.shift
-        `;
-        queryParams = [userId, categoryId, `${month}%`];
+        whereConditions.push(`(s.area_id = $${++paramCount} OR s.area_id IS NULL)`);
+        queryParams.push(areaId);
       }
+
+      if (carline) {
+        whereConditions.push(`s.carline = $${++paramCount}`);
+        queryParams.push(carline);
+      }
+
+      if (line) {
+        whereConditions.push(`s.line = $${++paramCount}`);
+        queryParams.push(line);
+      }
+
+      query = `
+        SELECT s.date_key, s.shift, s.signature_status, s.area_id
+        FROM checklist_signatures s
+        WHERE ${whereConditions.join(' AND ')}
+        ORDER BY s.date_key, s.shift
+      `;
     } else {
       // === TABEL GROUP LEADER ===
-      // ✅ FIX: Filter signature berdasarkan area_id (LANGSUNG, TANPA EXISTS)
+      let whereConditions = [
+        's.user_id = $1',
+        's.category_id = $2',
+        's.date_key LIKE $3'
+      ];
+      queryParams = [userId, categoryId, `${month}%`];
+      let paramCount = 3;
+
       if (areaId !== null) {
-        query = `
-          SELECT s.date_key, s.shift, s.signature_status, s.area_id
-          FROM checklist_signatures s
-          WHERE s.user_id = $1 
-            AND s.category_id = $2 
-            AND s.date_key LIKE $3
-            AND (s.area_id = $4 OR s.area_id IS NULL)
-          ORDER BY s.date_key, s.shift
-        `;
-        queryParams = [userId, categoryId, `${month}%`, areaId];
-      } else {
-        query = `
-          SELECT s.date_key, s.shift, s.signature_status, s.area_id
-          FROM checklist_signatures s
-          WHERE s.user_id = $1 
-            AND s.category_id = $2 
-            AND s.date_key LIKE $3
-          ORDER BY s.date_key, s.shift
-        `;
-        queryParams = [userId, categoryId, `${month}%`];
+        whereConditions.push(`(s.area_id = $${++paramCount} OR s.area_id IS NULL)`);
+        queryParams.push(areaId);
       }
+
+      if (carline) {
+        whereConditions.push(`s.carline = $${++paramCount}`);
+        queryParams.push(carline);
+      }
+
+      if (line) {
+        whereConditions.push(`s.line = $${++paramCount}`);
+        queryParams.push(line);
+      }
+
+      query = `
+        SELECT s.date_key, s.shift, s.signature_status, s.area_id
+        FROM checklist_signatures s
+        WHERE ${whereConditions.join(' AND ')}
+        ORDER BY s.date_key, s.shift
+      `;
     }
 
     // Eksekusi query

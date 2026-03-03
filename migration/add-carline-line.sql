@@ -11,6 +11,16 @@ CREATE INDEX IF NOT EXISTS idx_results_carline ON checklist_results(carline);
 CREATE INDEX IF NOT EXISTS idx_results_line ON checklist_results(line);
 CREATE INDEX IF NOT EXISTS idx_results_carline_line ON checklist_results(carline, line);
 
+-- 1b. Add carline and line columns to checklist_signatures table
+ALTER TABLE checklist_signatures 
+ADD COLUMN IF NOT EXISTS carline VARCHAR(100),
+ADD COLUMN IF NOT EXISTS line VARCHAR(100);
+
+-- Create indexes for faster queries on carline and line in signatures
+CREATE INDEX IF NOT EXISTS idx_signatures_carline ON checklist_signatures(carline);
+CREATE INDEX IF NOT EXISTS idx_signatures_line ON checklist_signatures(line);
+CREATE INDEX IF NOT EXISTS idx_signatures_carline_line ON checklist_signatures(carline, line);
+
 -- 2. Create carline_line_mapping table to store user's history
 CREATE TABLE IF NOT EXISTS carline_line_mapping (
     id SERIAL PRIMARY KEY,

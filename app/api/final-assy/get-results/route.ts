@@ -10,6 +10,8 @@ export async function GET(request: NextRequest) {
     const month = searchParams.get('month');
     const role = searchParams.get('role');
     const areaCode = searchParams.get('areaCode');
+    const carline = searchParams.get('carline');
+    const line = searchParams.get('line');
 
     if (!userId || !categoryCode || !month) {
       return NextResponse.json(
@@ -84,7 +86,7 @@ export async function GET(request: NextRequest) {
       r.date_key, r.item_id, r.shift, r.status,
       r.ng_description, r.ng_department,
       r.submitted_at, r.user_id, r.nik,
-      u.full_name, r.area_id
+      u.full_name, r.area_id, r.carline, r.line
     `;
 
     let query = '';
@@ -103,54 +105,67 @@ export async function GET(request: NextRequest) {
     //
     if (categoryCode === 'final-assy-inspector') {
       // Semua user bisa melihat data inspector di area ini (GL maupun Inspector)
+      let whereConditions = [
+        'r.category_id = $1',
+        'r.date_key LIKE $2'
+      ];
+      queryParams = [categoryId, `${month}%`];
+      let paramCount = 2;
+
       if (areaId !== null) {
-        query = `
-          SELECT ${selectCols}
-          FROM checklist_results r
-          LEFT JOIN users u ON r.user_id = u.id
-          WHERE r.category_id = $1
-            AND r.date_key LIKE $2
-            AND r.area_id = $3
-          ORDER BY r.date_key, r.item_id, r.shift
-        `;
-        queryParams = [categoryId, `${month}%`, areaId];
-      } else {
-        query = `
-          SELECT ${selectCols}
-          FROM checklist_results r
-          LEFT JOIN users u ON r.user_id = u.id
-          WHERE r.category_id = $1
-            AND r.date_key LIKE $2
-          ORDER BY r.date_key, r.item_id, r.shift
-        `;
-        queryParams = [categoryId, `${month}%`];
+        whereConditions.push(`r.area_id = $${++paramCount}`);
+        queryParams.push(areaId);
       }
+
+      if (carline) {
+        whereConditions.push(`r.carline = $${++paramCount}`);
+        queryParams.push(carline);
+      }
+
+      if (line) {
+        whereConditions.push(`r.line = $${++paramCount}`);
+        queryParams.push(line);
+      }
+
+      query = `
+        SELECT ${selectCols}
+        FROM checklist_results r
+        LEFT JOIN users u ON r.user_id = u.id
+        WHERE ${whereConditions.join(' AND ')}
+        ORDER BY r.date_key, r.item_id, r.shift
+      `;
     } else {
       // GL melihat data GL miliknya sendiri (user_id filter)
+      let whereConditions = [
+        'r.user_id = $1',
+        'r.category_id = $2',
+        'r.date_key LIKE $3'
+      ];
+      queryParams = [userId, categoryId, `${month}%`];
+      let paramCount = 3;
+
       if (areaId !== null) {
-        query = `
-          SELECT ${selectCols}
-          FROM checklist_results r
-          LEFT JOIN users u ON r.user_id = u.id
-          WHERE r.user_id = $1
-            AND r.category_id = $2
-            AND r.date_key LIKE $3
-            AND r.area_id = $4
-          ORDER BY r.date_key, r.item_id, r.shift
-        `;
-        queryParams = [userId, categoryId, `${month}%`, areaId];
-      } else {
-        query = `
-          SELECT ${selectCols}
-          FROM checklist_results r
-          LEFT JOIN users u ON r.user_id = u.id
-          WHERE r.user_id = $1
-            AND r.category_id = $2
-            AND r.date_key LIKE $3
-          ORDER BY r.date_key, r.item_id, r.shift
-        `;
-        queryParams = [userId, categoryId, `${month}%`];
+        whereConditions.push(`r.area_id = $${++paramCount}`);
+        queryParams.push(areaId);
       }
+
+      if (carline) {
+        whereConditions.push(`r.carline = $${++paramCount}`);
+        queryParams.push(carline);
+      }
+
+      if (line) {
+        whereConditions.push(`r.line = $${++paramCount}`);
+        queryParams.push(line);
+      }
+
+      query = `
+        SELECT ${selectCols}
+        FROM checklist_results r
+        LEFT JOIN users u ON r.user_id = u.id
+        WHERE ${whereConditions.join(' AND ')}
+        ORDER BY r.date_key, r.item_id, r.shift
+      `;
     }
 
     const results = await pool.query(query, queryParams);
