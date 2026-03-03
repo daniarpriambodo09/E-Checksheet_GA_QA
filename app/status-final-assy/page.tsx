@@ -546,14 +546,11 @@ export default function FinalAssyStatusPage() {
     
     const loadAreaId = async () => {
       try {
-        const res = await fetch(`/api/areas/get-by-category?categoryCode=${encodeURIComponent(categoryCode)}`);
+        const res = await fetch(`/api/final-assy/get-area-id?areaCode=${encodeURIComponent(selectedArea)}`);
         if (res.ok) {
           const data = await res.json();
-          if (data.success && data.areas) {
-            const area = data.areas.find((a: AreaOption) => a.area_code === selectedArea);
-            if (area) {
-              setSelectedAreaId(area.id);
-            }
+          if (data.id) {
+            setSelectedAreaId(data.id);
           }
         }
       } catch (error) {
@@ -562,7 +559,7 @@ export default function FinalAssyStatusPage() {
     };
     
     loadAreaId();
-  }, [selectedArea, categoryCode]);
+  }, [selectedArea]);
 
   useEffect(() => {
     if (!user?.id || !selectedArea) return;

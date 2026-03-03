@@ -91,15 +91,17 @@ export default function ChecksheetFinalAssyPage() {
     const loadCarlineLineHistory = async () => {
       if (!effectiveAreaCode) return;
       try {
-        // Extract area_id from area code format: "final-assy-insp-26" or "final-assy-gl-26"
-        const parts = effectiveAreaCode.split('-');
-        const areaId = parts[parts.length - 1];
-        
-        if (!areaId || isNaN(Number(areaId))) {
-          console.error('Invalid area code format:', effectiveAreaCode);
+        // Get area_id from area_code
+        const areaIdRes = await fetch(`/api/final-assy/get-area-id?areaCode=${encodeURIComponent(effectiveAreaCode)}`);
+        if (!areaIdRes.ok) {
+          console.error('Failed to get area_id for:', effectiveAreaCode);
           return;
         }
         
+        const areaIdData = await areaIdRes.json();
+        const areaId = areaIdData.id;
+        
+        // Now fetch carline/line history for this area
         const res = await fetch(`/api/final-assy/get-carline-line?areaId=${areaId}`);
         if (res.ok) {
           const data = await res.json();
