@@ -18,6 +18,8 @@ export async function POST(request: NextRequest) {
       ngDepartment,
       areaCode,
       timeSlot = '',
+      carline,
+      line,
     } = body;
 
     if (!userId || !categoryCode || itemId === undefined || !dateKey || !shift || !status) {
@@ -205,11 +207,13 @@ export async function POST(request: NextRequest) {
            user_id, nik, category_id, item_id,
            date_key, shift, time_slot, status,
            ng_description, ng_department, area_id,
+           carline, line,
            submitted_at, created_at, updated_at
          ) VALUES (
            $1, $2, $3, $4,
            $5, $6, $7, $8,
            $9, $10, $11,
+           $12, $13,
            NOW(), NOW(), NOW()
          )`,
         [
@@ -218,6 +222,8 @@ export async function POST(request: NextRequest) {
           ngDescription?.trim() || null,
           ngDepartment?.trim() || null,
           areaId,
+          carline?.trim() || null,
+          line?.trim() || null,
         ]
       );
     }
