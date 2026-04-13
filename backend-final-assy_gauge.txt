@@ -1,0 +1,2672 @@
+// app/api/final-assy/check-duplicate/route.ts
+
+import { NextRequest, NextResponse } from 'next/server';
+import pool from '@/lib/db';
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const {
+      userId,
+      categoryCode,
+      gaugeId,      // ✅ KUNCI UTAMA: gauge_id dari QR code scan
+      dateKey,
+      shift,
+      areaCode,
+      carline,
+      line,
+      specificArea,
+    } = body;
+
+    if (!userId || !categoryCode || !dateKey || !shift) {
+      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    }
+
+    // Jika tidak ada gaugeId → tidak bisa cek duplikat per gauge → tidak ada duplikat
+    if (!gaugeId || !gaugeId.trim()) {
+      return NextResponse.json({ isDuplicate: false });
+    }
+
+    const gaugeIdVal = gaugeId.trim();
+
+    // 1. Get category_id
+    const catRes = await pool.query(
+      `SELECT id FROM checklist_categories WHERE category_code = $1`,
+      [categoryCode]
+    );
+    if (catRes.rowCount === 0) {
+      return NextResponse.json({ error: 'Category not found' }, { status: 404 });
+    }
+    const categoryId = catRes.rows[0].id;
+
+    // 2. Resolve area_id dari areaCode yang dikirim sekarang
+    let currentAreaId: number | null = null;
+    if (areaCode) {
+      let areaRes = await pool.query(
+        `SELECT id FROM checklist_areas
+         WHERE area_code = $1 AND category_id = $2 AND is_active = TRUE LIMIT 1`,
+        [areaCode, categoryId]
+      );
+      if ((areaRes.rowCount ?? 0) === 0) {
+        areaRes = await pool.query(
+          `SELECT id FROM checklist_areas WHERE area_code = $1 AND is_active = TRUE LIMIT 1`,
+          [areaCode]
+        );
+      }
+      if ((areaRes.rowCount ?? 0) > 0) currentAreaId = areaRes.rows[0].id;
+    }
+
+    // 3. Normalize nilai
+    const carlineVal     = carline?.trim()     || null;
+    const lineVal        = line?.trim()        || null;
+    const specificAreaVal = (typeof specificArea === 'string' && specificArea.trim())
+      ? specificArea.trim() : null;
+
+    // 4. Cek apakah gauge_id ini sudah di-checklist di tanggal + shift yang sama
+    //    tapi dengan kombinasi area/carline/line/specificArea yang BERBEDA.
+    //
+    //    gauge_id disimpan di kolom time_slot.
+    //    Cari row dengan time_slot = gaugeId DAN kombinasi lokasi berbeda.
+    const dupRes = await pool.query(
+      `SELECT
+         r.id,
+         r.status,
+         r.carline,
+         r.line,
+         r.specific_area,
+         r.time_slot AS gauge_id,
+         ca.area_name,
+         ca.area_code,
+         ci.item_check
+       FROM checklist_results r
+       LEFT JOIN checklist_areas ca ON r.area_id = ca.id
+       LEFT JOIN checklist_items ci ON r.item_id = ci.id
+       WHERE r.user_id     = $1
+         AND r.category_id = $2
+         AND r.time_slot   = $3
+         AND r.date_key    = $4
+         AND r.shift       = $5
+         AND NOT (
+           COALESCE(r.area_id,           -1) = COALESCE($6,  -1)
+           AND COALESCE(r.carline,       '') = COALESCE($7,  '')
+           AND COALESCE(r.line,          '') = COALESCE($8,  '')
+           AND COALESCE(r.specific_area, '') = COALESCE($9,  '')
+         )
+       LIMIT 5`,
+      [userId, categoryId, gaugeIdVal, dateKey, shift,
+       currentAreaId, carlineVal, lineVal, specificAreaVal]
+    );
+
+    if ((dupRes.rowCount ?? 0) === 0) {
+      return NextResponse.json({ isDuplicate: false });
+    }
+
+    // Ada duplikat — kumpulkan info lokasi yang sudah check gauge ini
+    const duplicates = dupRes.rows.map((row: any) => {
+      const parts: string[] = [];
+      if (row.area_name)  parts.push(row.area_name);
+      if (row.carline && row.line) parts.push(`${row.carline} - ${row.line}`);
+      else if (row.carline) parts.push(`Carline ${row.carline}`);
+      if (row.specific_area) parts.push(row.specific_area);
+      return {
+        description:  parts.join(' / '),
+        areaName:     row.area_name     || null,
+        carline:      row.carline       || null,
+        line:         row.line          || null,
+        specificArea: row.specific_area || null,
+        itemCheck:    row.item_check    || null,
+        gaugeId:      row.gauge_id      || null,
+      };
+    });
+
+    return NextResponse.json({
+      isDuplicate: true,
+      duplicates,
+    });
+
+  } catch (err: any) {
+    console.error('❌ [Check Duplicate] Error:', err.message);
+    return NextResponse.json(
+      { error: 'Server error', detail: err.message },
+      { status: 500 }
+    );
+  }
+}
+
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    },
+  });
+}
+
+import { NextRequest, NextResponse } from 'next/server';
+import pool from '@/lib/db';
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const { conveyor, categoryCode, userId, areaCode } = body;
+
+    if (!conveyor || !categoryCode) {
+      return NextResponse.json(
+        { error: 'Conveyor dan categoryCode wajib diisi.' },
+        { status: 400 }
+      );
+    }
+
+    const conveyorVal = String(conveyor).trim().toUpperCase();
+    const categoryCodeVal = String(categoryCode).trim();
+    const userIdVal = userId || 'system';
+
+    if (!conveyorVal) {
+      return NextResponse.json(
+        { error: 'Nama conveyor tidak boleh kosong.' },
+        { status: 400 }
+      );
+    }
+
+    console.log(`🔍 [FA Delete Conveyor] Searching for conveyor="${conveyorVal}" category="${categoryCodeVal}" user="${userIdVal}"`);
+
+    let existing = await pool.query(
+      `SELECT id FROM carline_line_mapping
+       WHERE conveyor = $1
+         AND category_code = $2
+         AND user_id = $3
+         AND is_active = TRUE
+       LIMIT 1`,
+      [conveyorVal, categoryCodeVal, userIdVal]
+    );
+
+    console.log(`📊 [FA Delete Conveyor] Exact match found: ${existing.rowCount} rows`);
+
+    if (existing.rowCount === 0) {
+      const alternateCategory = categoryCodeVal === 'final-assy-inspector'
+        ? 'final-assy-gl'
+        : 'final-assy-inspector';
+
+      existing = await pool.query(
+        `SELECT id FROM carline_line_mapping
+         WHERE conveyor = $1
+           AND category_code IN ($2, $3)
+           AND is_active = TRUE
+         LIMIT 1`,
+        [conveyorVal, categoryCodeVal, alternateCategory]
+      );
+
+      console.log(`📊 [FA Delete Conveyor] Alternate category match found: ${existing.rowCount} rows`);
+    }
+
+    if (existing.rowCount === 0) {
+      existing = await pool.query(
+        `SELECT id FROM carline_line_mapping
+         WHERE conveyor = $1
+           AND is_active = TRUE
+         LIMIT 1`,
+        [conveyorVal]
+      );
+
+      console.log(`📊 [FA Delete Conveyor] Any active match found: ${existing.rowCount} rows`);
+    }
+
+    if (existing.rowCount === 0) {
+      console.log(`❌ [FA Delete Conveyor] No conveyor found for deletion`);
+      return NextResponse.json(
+        { error: 'Conveyor tidak ditemukan.' },
+        { status: 404 }
+      );
+    }
+
+    console.log(`✅ [FA Delete Conveyor] Deleting conveyor id=${existing.rows[0].id}`);
+
+    // ── Soft delete: hanya set is_active = FALSE ────────────────────
+    // Tidak perlu cek penggunaan karena penghapusan hanya dari dropdown,
+    // data checklist tetap aman.
+    await pool.query(
+      `UPDATE carline_line_mapping
+       SET is_active = FALSE, updated_at = NOW()
+       WHERE id = $1`,
+      [existing.rows[0].id]
+    );
+
+    console.log(`✅ [FA Delete Conveyor] Successfully soft-deleted conveyor`);
+
+    return NextResponse.json({ success: true, message: 'Conveyor berhasil dihapus dari daftar.' });
+  } catch (error: any) {
+    console.error('❌ [FA Delete Conveyor] Error:', error.message, '| code:', error.code);
+    return NextResponse.json(
+      { error: 'Gagal menghapus conveyor.', detail: error.message, code: error.code || null },
+      { status: 500 }
+    );
+  }
+}
+
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    },
+  });
+}
+
+// app/api/final-assy/get-area-id/route.ts
+
+import { NextRequest, NextResponse } from 'next/server';
+import { executeQuery } from '@/lib/db-helpers';
+
+interface AreaResult {
+  id: number;
+  area_code: string;
+}
+
+export async function GET(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const areaCode = searchParams.get('areaCode');
+
+    if (!areaCode) {
+      return NextResponse.json(
+        { error: 'areaCode is required' },
+        { status: 400 }
+      );
+    }
+
+    // Query database to get area_id from area_code
+    const results = await executeQuery<AreaResult>(
+    `SELECT id FROM checklist_areas WHERE area_code = $1 LIMIT 1`,
+    [areaCode]
+    );
+    
+    if (results.length === 0) {
+      return NextResponse.json(
+        { error: 'Area not found' },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json({ id: results[0].id });
+  } catch (error) {
+    console.error('Error fetching area_id:', error);
+    return NextResponse.json(
+      { error: 'Failed to fetch area_id' },
+      { status: 500 }
+    );
+  }
+}
+
+// app/api/final-assy/get-carline-line/route.ts
+// Diupdate: membaca conveyor dari checklist_results (kolom conveyor DAN carline)
+// serta dari carline_line_mapping (kolom conveyor).
+// Return format tetap [{carline, line, conveyor}] untuk backward compat.
+
+import { NextRequest, NextResponse } from 'next/server';
+import { executeQuery } from '@/lib/db-helpers';
+
+interface AreaRow    { id: number; }
+interface ConveyorRow { conveyor: string | null; carline: string | null; line: string | null; }
+
+function extractLocationSlug(areaCode: string): string {
+  const prefixes = [
+    'final-assy-gl-',
+    'final-assy-insp-',
+    'final-assy-',
+  ];
+  for (const prefix of prefixes) {
+    if (areaCode.startsWith(prefix)) return areaCode.slice(prefix.length);
+  }
+  return areaCode;
+}
+
+export async function GET(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const areaCode = searchParams.get('areaCode');
+    const areaId   = searchParams.get('areaId');
+
+    if (!areaCode && !areaId) {
+      return NextResponse.json(
+        { error: 'areaCode or areaId is required' },
+        { status: 400 }
+      );
+    }
+
+    // ── Resolve areaIds ────────────────────────────────────────────
+    let areaIds: number[] = [];
+
+    if (areaCode) {
+      const slug = extractLocationSlug(areaCode);
+
+      const areaRows = await executeQuery<AreaRow>(
+        `SELECT id FROM checklist_areas
+         WHERE area_code LIKE $1
+           AND is_active = TRUE`,
+        [`%-${slug}`]
+      );
+
+      if (areaRows.length === 0) {
+        const exactRows = await executeQuery<AreaRow>(
+          `SELECT id FROM checklist_areas
+           WHERE area_code = $1 AND is_active = TRUE`,
+          [areaCode]
+        );
+        areaIds = exactRows.map(r => r.id);
+      } else {
+        areaIds = areaRows.map(r => r.id);
+      }
+    } else if (areaId) {
+      areaIds = [parseInt(areaId)];
+    }
+
+    if (areaIds.length === 0) {
+      return NextResponse.json([]);
+    }
+
+    if (areaIds.length === 0) {
+      return NextResponse.json([]);
+    }
+
+    // ── Baca conveyor dari carline_line_mapping yang aktif ──────────
+    // Dropdown hanya menampilkan conveyor yang tersedia di mapping aktif.
+    // Tidak termasuk dari checklist_results untuk menghindari data lama.
+    const mappingRows = await executeQuery<ConveyorRow>(
+      `SELECT DISTINCT conveyor, NULL AS carline, NULL AS line
+       FROM carline_line_mapping
+       WHERE is_active = TRUE
+         AND category_code IN ('final-assy-inspector', 'final-assy-gl')
+       ORDER BY conveyor ASC`
+    );
+
+    // Deduplikasi dan format output
+    const seen = new Set<string>();
+    const output: Array<{ carline: string; line: string; conveyor: string }> = [];
+
+    for (const row of mappingRows) {
+      const cv = String(row.conveyor || '').trim().toUpperCase();
+      if (!cv || seen.has(cv)) continue;
+      seen.add(cv);
+      output.push({
+        conveyor: cv,
+        carline: cv,
+        line: '',
+      });
+    }
+
+    console.log(
+      `✅ [FA get-carline-line] ${output.length} active conveyor(s) from mapping`
+    );
+
+    return NextResponse.json(output);
+
+  } catch (error) {
+    console.error('❌ [FA get-carline-line] Error:', error);
+    return NextResponse.json(
+      { error: 'Failed to fetch conveyor data' },
+      { status: 500 }
+    );
+  }
+}
+
+// app/api/final-assy/get-checklist-items/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { executeQuery } from '@/lib/db-helpers';
+
+interface ChecklistItem {
+  id: number;
+  no: string;
+  item_check: string;
+  check_point: string;
+  metode_check: string;
+  area: string;
+  shift: string;
+  show_in_wp_check: boolean;
+  show_in_checker: boolean;
+  show_in_visual_1: boolean;
+  show_in_visual_2: boolean;
+  show_in_double_check: boolean;
+}
+
+export async function GET(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const type = searchParams.get('type');
+
+    if (!type) {
+      return NextResponse.json({ error: 'Missing type parameter' }, { status: 400 });
+    }
+
+    let categoryId: number;
+
+    if (type === 'inspector') {
+      const categories = await executeQuery<{ id: number }>(
+        'SELECT id FROM checklist_categories WHERE category_code = $1',
+        ['final-assy-inspector']
+      );
+      if (categories.length === 0) {
+        return NextResponse.json({ error: 'Category not found' }, { status: 404 });
+      }
+      categoryId = categories[0].id;
+    } else if (type === 'group-leader') {
+      const categories = await executeQuery<{ id: number }>(
+        'SELECT id FROM checklist_categories WHERE category_code = $1',
+        ['final-assy-gl']
+      );
+      if (categories.length === 0) {
+        return NextResponse.json({ error: 'Category not found' }, { status: 404 });
+      }
+      categoryId = categories[0].id;
+    } else {
+      return NextResponse.json({ error: 'Invalid type' }, { status: 400 });
+    }
+
+    const items = await executeQuery<ChecklistItem>(
+      `SELECT
+         id,
+         item_no as no,
+         item_check,
+         check_point,
+         metode_check,
+         area,
+         shift,
+         show_in_wp_check,
+         show_in_checker,
+         show_in_visual_1,
+         show_in_visual_2,
+         show_in_double_check
+       FROM checklist_items
+       WHERE category_id = $1 AND is_active = TRUE
+       ORDER BY sort_order, id`,
+      [categoryId]
+    );
+
+    // ✅ FIX: Kelompokkan per (no, item_check, check_point, metode_check)
+    // dan simpan shiftIdMap = { "A": db_id_shift_a, "B": db_id_shift_b }
+    // Catatan: untuk final-assy-inspector, semua item di DB hanya shift A.
+    // shiftIdMap["B"] akan fallback ke id shift A sehingga lookup di status page
+    // tetap menemukan data yang tersimpan (karena save-result juga pakai id shift A).
+    const groupedItems: Record<string, any> = {};
+
+    items.forEach((row) => {
+      const key = `${row.no}-${row.item_check}-${row.check_point}-${row.metode_check}`;
+
+      if (!groupedItems[key]) {
+        groupedItems[key] = {
+          id: row.id,
+          no: row.no,
+          itemCheck: row.item_check,
+          checkPoint: row.check_point,
+          metodeCheck: row.metode_check,
+          area: row.area,
+          shifts: [],
+          shiftIdMap: {} as Record<string, number>,
+          showIn: {
+            wpCheck: row.show_in_wp_check,
+            checker: row.show_in_checker,
+            visual1: row.show_in_visual_1,
+            visual2: row.show_in_visual_2,
+            doubleCheck: row.show_in_double_check,
+          },
+        };
+      }
+
+      if (!groupedItems[key].shifts.some((s: any) => s.shift === row.shift)) {
+        groupedItems[key].shifts.push({ shift: row.shift });
+      }
+
+      // Simpan id real DB per shift
+      groupedItems[key].shiftIdMap[row.shift] = row.id;
+    });
+
+    // ✅ FIX KRITIS: Untuk inspector, DB hanya punya shift A.
+    // Tambahkan shift B ke shifts array dan shiftIdMap["B"] = id shift A
+    // agar status page bisa menampilkan data untuk kedua shift.
+    if (type === 'inspector') {
+      Object.values(groupedItems).forEach((item: any) => {
+        const hasShiftB = item.shifts.some((s: any) => s.shift === 'B');
+        if (!hasShiftB) {
+          item.shifts.push({ shift: 'B' });
+          // Shift B pakai id yang sama dengan shift A
+          // karena DB inspector hanya punya 1 item_id per checkpoint
+          item.shiftIdMap['B'] = item.shiftIdMap['A'] ?? item.id;
+        }
+      });
+    }
+
+    console.log(`✅ Loaded ${Object.values(groupedItems).length} checklist items for type: ${type}`);
+
+    return NextResponse.json({
+      success: true,
+      data: Object.values(groupedItems),
+      type,
+      categoryId,
+    });
+
+  } catch (error) {
+    console.error('❌ Error fetching checklist items:', error);
+    return NextResponse.json({
+      error: 'Server error',
+      details: error instanceof Error ? error.message : 'Unknown error',
+    }, { status: 500 });
+  }
+}
+
+// app/api/final-assy/get-results/route.ts
+// Diupdate: terima query param `conveyor` (selain carline/line lama),
+// filter berdasarkan kolom conveyor di checklist_results,
+// dan sertakan field conveyor di response formatted.
+
+import { NextRequest, NextResponse } from 'next/server';
+import pool from '@/lib/db';
+
+export async function GET(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const userId       = searchParams.get('userId');
+    const categoryCode = searchParams.get('categoryCode');
+    const month        = searchParams.get('month');
+    const role         = searchParams.get('role');
+    const areaCode     = searchParams.get('areaCode');
+    const carline      = searchParams.get('carline');
+    const line         = searchParams.get('line');
+    const conveyor     = searchParams.get('conveyor'); // ← param baru
+    const shift        = searchParams.get('shift');
+    const specificArea = searchParams.get('specificArea');
+
+    if (!userId || !categoryCode || !month) {
+      return NextResponse.json(
+        { error: 'Missing required parameters: userId, categoryCode, month' },
+        { status: 400 }
+      );
+    }
+
+    // 1. Validasi user
+    const users = await pool.query(
+      `SELECT id FROM users WHERE id = $1 AND is_active = TRUE`,
+      [userId]
+    );
+    if (users.rows.length === 0) {
+      return NextResponse.json({ error: 'Invalid user' }, { status: 403 });
+    }
+
+    // 2. category_id
+    const categories = await pool.query(
+      `SELECT id FROM checklist_categories WHERE category_code = $1`,
+      [categoryCode]
+    );
+    if (categories.rows.length === 0) {
+      return NextResponse.json({ error: 'Category not found' }, { status: 404 });
+    }
+    const categoryId = categories.rows[0].id;
+
+    // 3. Resolve area_id
+    let areaId: number | null = null;
+    if (areaCode) {
+      let areaResult = await pool.query(
+        `SELECT id FROM checklist_areas
+         WHERE area_code = $1 AND category_id = $2 AND is_active = TRUE LIMIT 1`,
+        [areaCode, categoryId]
+      );
+      if (areaResult.rows.length === 0) {
+        areaResult = await pool.query(
+          `SELECT id FROM checklist_areas
+           WHERE area_code = $1 AND is_active = TRUE ORDER BY id ASC LIMIT 1`,
+          [areaCode]
+        );
+      }
+      if (areaResult.rows.length > 0) {
+        areaId = areaResult.rows[0].id;
+        console.log('✅ [FA Get Results] Area resolved:', { areaCode, areaId, categoryId });
+      } else {
+        console.warn('⚠️ [FA Get Results] Area not found:', areaCode);
+        return NextResponse.json({
+          success: true, formatted: {}, count: 0,
+          warning: `Area not found: ${areaCode}`,
+        });
+      }
+    }
+
+    // 4. Resolve conveyor value untuk filter
+    // Frontend baru mengirim `conveyor`; frontend lama mengirim `carline`.
+    // Gunakan salah satunya sebagai filter karena carlineVal=conveyor di save.
+    const conveyorFilter = conveyor?.trim() || carline?.trim() || null;
+
+    // 5. Build query
+    const selectCols = `
+      r.date_key, r.item_id, r.shift, r.status,
+      r.ng_description, r.ng_department, r.ng_photos,
+      r.submitted_at, r.user_id, r.nik,
+      r.specific_area, r.conveyor,
+      u.full_name, r.area_id, r.carline, r.line,
+      ci.item_no
+    `;
+
+    let query       = '';
+    let queryParams: any[] = [];
+
+    if (categoryCode === 'final-assy-inspector') {
+      let whereConditions = ['r.category_id = $1', 'r.date_key LIKE $2'];
+      queryParams = [categoryId, `${month}%`];
+      let paramCount = 2;
+
+      if (shift) {
+        whereConditions.push(`r.shift = $${++paramCount}`);
+        queryParams.push(shift);
+      }
+      if (areaId !== null) {
+        whereConditions.push(`r.area_id = $${++paramCount}`);
+        queryParams.push(areaId);
+      }
+      if (conveyorFilter) {
+        // Filter: cocokkan kolom conveyor atau carline (backward compat)
+        whereConditions.push(
+          `(COALESCE(r.conveyor, r.carline, '') = $${++paramCount})`
+        );
+        queryParams.push(conveyorFilter);
+      }
+      if (specificArea) {
+        whereConditions.push(`COALESCE(r.specific_area, '') = $${++paramCount}`);
+        queryParams.push(specificArea);
+      }
+
+      query = `
+        SELECT ${selectCols}
+        FROM checklist_results r
+        LEFT JOIN users u ON r.user_id = u.id
+        LEFT JOIN checklist_items ci ON r.item_id = ci.id
+        WHERE ${whereConditions.join(' AND ')}
+        ORDER BY r.date_key, ci.item_no, r.item_id, r.shift
+      `;
+    } else {
+      // GL mode — tidak berubah
+      let whereConditions = [
+        'r.user_id = $1', 'r.category_id = $2', 'r.date_key LIKE $3',
+      ];
+      queryParams = [userId, categoryId, `${month}%`];
+      let paramCount = 3;
+
+      if (shift) {
+        whereConditions.push(`r.shift = $${++paramCount}`);
+        queryParams.push(shift);
+      }
+      if (areaId !== null) {
+        whereConditions.push(`r.area_id = $${++paramCount}`);
+        queryParams.push(areaId);
+      }
+      if (conveyorFilter) {
+        whereConditions.push(
+          `(COALESCE(r.conveyor, r.carline, '') = $${++paramCount})`
+        );
+        queryParams.push(conveyorFilter);
+      }
+
+      query = `
+        SELECT ${selectCols}
+        FROM checklist_results r
+        LEFT JOIN users u ON r.user_id = u.id
+        LEFT JOIN checklist_items ci ON r.item_id = ci.id
+        WHERE ${whereConditions.join(' AND ')}
+        ORDER BY r.date_key, r.item_id, r.shift
+      `;
+    }
+
+    const results = await pool.query(query, queryParams);
+    console.log(
+      `✅ [FA Get Results] Found ${results.rows.length} rows | ` +
+      `category=${categoryCode} area_id=${areaId} ` +
+      `conveyor=${conveyorFilter ?? 'ALL'} specificArea=${specificArea ?? 'ALL'}`
+    );
+
+    // 6. Format response
+    const formatted: Record<string, Record<string, any>> = {};
+
+    if (categoryCode === 'final-assy-inspector') {
+      results.rows.forEach((row: any) => {
+        const itemNo      = row.item_no ?? String(row.item_id);
+        const rowSpecArea = row.specific_area || 'WP CHECK';
+
+        if (!formatted[row.date_key]) formatted[row.date_key] = {};
+
+        const key = `${itemNo}-${rowSpecArea}-${row.shift}`;
+        formatted[row.date_key][key] = {
+          status:        row.status,
+          ngCount:       row.status === 'NG' ? 1 : 0,
+          items:         [],
+          notes:         '',
+          submittedAt:   row.submitted_at,
+          submittedBy:   row.full_name || row.user_id || 'System',
+          ngDescription: row.ng_description || '',
+          ngDepartment:  row.ng_department  || 'QA',
+          ngPhotos:      row.ng_photos      || null,
+          areaId:        row.area_id,
+          // Sertakan keduanya untuk compat
+          conveyor:      row.conveyor || row.carline || null,
+          carline:       row.carline  || null,
+          line:          row.line     || null,
+          specificArea:  row.specific_area || null,
+        };
+      });
+    } else {
+      results.rows.forEach((row: any) => {
+        if (!formatted[row.date_key]) formatted[row.date_key] = {};
+        const itemKey = `${row.item_id}-${row.shift}`;
+        formatted[row.date_key][itemKey] = {
+          status:        row.status,
+          ngCount:       row.status === 'NG' ? 1 : 0,
+          items:         [],
+          notes:         '',
+          submittedAt:   row.submitted_at,
+          submittedBy:   row.full_name || row.user_id || 'System',
+          ngDescription: row.ng_description || '',
+          ngDepartment:  row.ng_department  || 'QA',
+          ngPhotos:      row.ng_photos      || null,
+          areaId:        row.area_id,
+          conveyor:      row.conveyor || row.carline || null,
+          carline:       row.carline  || null,
+          line:          row.line     || null,
+        };
+      });
+    }
+
+    return NextResponse.json({
+      success:      true,
+      formatted,
+      count:        results.rows.length,
+      role,
+      categoryCode,
+      areaCode:     areaCode || null,
+      areaId,
+      conveyor:     conveyorFilter || null,
+    });
+
+  } catch (error) {
+    console.error('❌ [FA Get Results] Error:', error);
+    return NextResponse.json(
+      { error: 'Server error', details: error instanceof Error ? error.message : 'Unknown error' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin':  '*',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    },
+  });
+}
+
+// app/api/final-assy/get-signatures/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import pool from '@/lib/db';
+
+interface User {
+  id: string;
+  username: string;
+  full_name: string;
+  nik: string;
+  department: string;
+  role: string;
+}
+
+interface Category {
+  id: number;
+}
+
+interface Signature {
+  date_key: string;
+  shift: string;
+  signature_status: string;
+  area_id: number | null;
+}
+
+export async function GET(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const userId = searchParams.get('userId');
+    const categoryCode = searchParams.get('categoryCode');
+    const month = searchParams.get('month');
+    const role = searchParams.get('role');
+    const areaCode = searchParams.get('areaCode');
+    const carline = searchParams.get('carline');
+    const line = searchParams.get('line');
+
+    if (!userId || !categoryCode || !month) {
+      return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
+    }
+
+    // Validasi userId
+    const users = await pool.query<User>(
+      'SELECT id, username, full_name, nik, department, role FROM users WHERE id = $1 AND is_active = TRUE',
+      [userId]
+    );
+    if (users.rows.length === 0) {
+      return NextResponse.json({ error: 'Invalid user' }, { status: 403 });
+    }
+
+    // Ambil category_id
+    const categories = await pool.query<Category>(
+      'SELECT id FROM checklist_categories WHERE category_code = $1',
+      [categoryCode]
+    );
+    if (categories.rows.length === 0) {
+      return NextResponse.json({ error: 'Category not found' }, { status: 404 });
+    }
+    const categoryId = categories.rows[0].id;
+
+    // =========================================================
+    // 🔹 BUILD QUERY - Filter signature berdasarkan area_id
+    // =========================================================
+    let query = '';
+    let queryParams: any[] = [];
+
+    // ✅ RESOLVE AREA_ID DARI AREA_CODE
+    let areaId: number | null = null;
+    if (areaCode) {
+      const areaResult = await pool.query(
+        `SELECT id FROM checklist_areas 
+         WHERE area_code = $1 AND category_id = $2 AND is_active = TRUE`,
+        [areaCode, categoryId]
+      );
+      if (areaResult.rows.length > 0) {
+        areaId = areaResult.rows[0].id;
+      }
+    }
+
+    if (categoryCode === 'final-assy-inspector') {
+      // === TABEL INSPECTOR ===
+      let whereConditions = [
+        's.user_id = $1',
+        's.category_id = $2',
+        's.date_key LIKE $3'
+      ];
+      queryParams = [userId, categoryId, `${month}%`];
+      let paramCount = 3;
+
+      if (areaId !== null) {
+        whereConditions.push(`(s.area_id = $${++paramCount} OR s.area_id IS NULL)`);
+        queryParams.push(areaId);
+      }
+
+      if (carline) {
+        whereConditions.push(`s.carline = $${++paramCount}`);
+        queryParams.push(carline);
+      }
+
+      if (line) {
+        whereConditions.push(`s.line = $${++paramCount}`);
+        queryParams.push(line);
+      }
+
+      query = `
+        SELECT s.date_key, s.shift, s.signature_status, s.area_id
+        FROM checklist_signatures s
+        WHERE ${whereConditions.join(' AND ')}
+        ORDER BY s.date_key, s.shift
+      `;
+    } else {
+      // === TABEL GROUP LEADER ===
+      let whereConditions = [
+        's.user_id = $1',
+        's.category_id = $2',
+        's.date_key LIKE $3'
+      ];
+      queryParams = [userId, categoryId, `${month}%`];
+      let paramCount = 3;
+
+      if (areaId !== null) {
+        whereConditions.push(`(s.area_id = $${++paramCount} OR s.area_id IS NULL)`);
+        queryParams.push(areaId);
+      }
+
+      if (carline) {
+        whereConditions.push(`s.carline = $${++paramCount}`);
+        queryParams.push(carline);
+      }
+
+      if (line) {
+        whereConditions.push(`s.line = $${++paramCount}`);
+        queryParams.push(line);
+      }
+
+      query = `
+        SELECT s.date_key, s.shift, s.signature_status, s.area_id
+        FROM checklist_signatures s
+        WHERE ${whereConditions.join(' AND ')}
+        ORDER BY s.date_key, s.shift
+      `;
+    }
+
+    // Eksekusi query
+    const signatures = await pool.query<Signature>(query, queryParams);
+
+    // Format response
+    const formatted: Record<string, Record<string, string>> = {};
+    signatures.rows.forEach((row: any) => {
+      if (!formatted[row.date_key]) formatted[row.date_key] = {};
+      formatted[row.date_key][row.shift] = row.signature_status;
+    });
+
+    return NextResponse.json({
+      success: true,
+      formatted,
+      count: signatures.rows.length,
+      role,
+      categoryCode,
+      areaCode: areaCode || null,
+      areaId
+    });
+  } catch (error) {
+    console.error('❌ Get signatures error:', error);
+    return NextResponse.json({
+      error: 'Server error',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    }, { status: 500 });
+  }
+}
+
+// app/api/final-assy/save-carline-line/route.ts
+
+import { NextRequest, NextResponse } from 'next/server';
+import { executeQuery } from '@/lib/db-helpers';
+
+interface SaveCarlineLineRequest {
+  carline: string;
+  line: string;
+  areaId?: number;
+  userId?: string;
+  categoryCode?: string;
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const body: SaveCarlineLineRequest = await request.json();
+    const { carline, line, areaId, userId, categoryCode } = body;
+
+    if (!carline || !line) {
+      return NextResponse.json(
+        { error: 'Carline and line are required' },
+        { status: 400 }
+      );
+    }
+
+    // Save to carline_line_mapping for history tracking
+    if (userId && categoryCode) {
+      const existing = await executeQuery(
+        `SELECT id FROM carline_line_mapping 
+         WHERE user_id = $1 AND carline = $2 AND line = $3 AND category_code = $4`,
+        [userId, carline, line, categoryCode]
+      );
+
+      if (existing.length === 0) {
+        await executeQuery(
+          `INSERT INTO carline_line_mapping (user_id, carline, line, category_code, is_active, created_at, updated_at) 
+           VALUES ($1, $2, $3, $4, TRUE, NOW(), NOW())`,
+          [userId, carline, line, categoryCode]
+        );
+      } else {
+        // Update is_active if it was previously disabled
+        await executeQuery(
+          `UPDATE carline_line_mapping 
+           SET is_active = TRUE, updated_at = NOW()
+           WHERE user_id = $1 AND carline = $2 AND line = $3 AND category_code = $4`,
+          [userId, carline, line, categoryCode]
+        );
+      }
+    }
+
+    return NextResponse.json({ 
+      success: true, 
+      message: 'Carline and line saved successfully' 
+    });
+  } catch (error) {
+    console.error('Error saving carline-line data:', error);
+    return NextResponse.json(
+      { error: 'Failed to save carline-line data' },
+      { status: 500 }
+    );
+  }
+}
+
+// app/api/final-assy/save-conveyor/route.ts
+// API baru untuk menyimpan Conveyor di final-assy inspector.
+// Konsisten dengan /api/pre-assy/save-conveyor namun untuk category final-assy-inspector.
+
+import { NextRequest, NextResponse } from 'next/server';
+import pool from '@/lib/db';
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const { conveyor, areaCode, userId, categoryCode } = body;
+
+    // 1. Validasi
+    if (!conveyor || !areaCode) {
+      return NextResponse.json(
+        { error: 'Conveyor dan Area wajib diisi.' },
+        { status: 400 }
+      );
+    }
+
+    const conveyorVal     = String(conveyor).trim().toUpperCase();
+    const categoryCodeVal = categoryCode
+      ? String(categoryCode).trim()
+      : 'final-assy-inspector';
+    const userIdVal       = userId || 'system';
+
+    if (conveyorVal.length === 0) {
+      return NextResponse.json(
+        { error: 'Nama conveyor tidak boleh kosong.' },
+        { status: 400 }
+      );
+    }
+
+    console.log(
+      `📥 [FA Save Conveyor] conveyor="${conveyorVal}" ` +
+      `category="${categoryCodeVal}" user="${userIdVal}"`
+    );
+
+    // 2. Cek duplikasi — hanya cek kolom `conveyor` (kolom carline/line sudah dihapus)
+    const existing = await pool.query(
+      `SELECT 1 FROM carline_line_mapping
+       WHERE conveyor       = $1
+         AND category_code  = $2
+         AND user_id        = $3
+         AND is_active      = TRUE
+       LIMIT 1`,
+      [conveyorVal, categoryCodeVal, userIdVal]
+    );
+
+    if (existing.rowCount && existing.rowCount > 0) {
+      console.log(
+        `ℹ️ [FA Save Conveyor] Sudah ada: "${conveyorVal}" ` +
+        `user="${userIdVal}" category="${categoryCodeVal}"`
+      );
+      return NextResponse.json(
+        { error: `Conveyor "${conveyorVal}" sudah terdaftar.` },
+        { status: 409 }
+      );
+    }
+
+    // 3. INSERT — hanya kolom yang ada di skema tabel saat ini:
+    //    id, user_id, category_code, is_active, created_at, updated_at, conveyor
+    //    (kolom carline dan line sudah di-DROP via migrasi)
+    await pool.query(
+      `INSERT INTO carline_line_mapping
+         (user_id, category_code, conveyor, is_active, created_at, updated_at)
+       VALUES ($1, $2, $3, TRUE, NOW(), NOW())`,
+      [userIdVal, categoryCodeVal, conveyorVal]
+    );
+
+    console.log(
+      `✅ [FA Save Conveyor] Berhasil: "${conveyorVal}" ` +
+      `category="${categoryCodeVal}"`
+    );
+
+    return NextResponse.json({
+      success:  true,
+      conveyor: conveyorVal,
+      message:  'Conveyor berhasil ditambahkan.',
+    });
+
+  } catch (error: any) {
+    console.error('❌ [FA Save Conveyor] Error:', error.message, '| code:', error.code);
+
+    // Unique constraint: carline_line_mapping_user_id_conveyor_category_code_key
+    if (error.code === '23505') {
+      return NextResponse.json(
+        { error: 'Conveyor sudah terdaftar.' },
+        { status: 409 }
+      );
+    }
+
+    return NextResponse.json(
+      {
+        error:  'Gagal menyimpan conveyor.',
+        detail: error.message,
+        code:   error.code || null,
+      },
+      { status: 500 }
+    );
+  }
+}
+
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin':  '*',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    },
+  });
+}
+
+// app/api/final-assy/save-result/route.ts
+// Diupdate: terima field `conveyor` dari frontend (untuk inspector mode),
+// simpan ke kolom `conveyor` DAN `carline` di checklist_results agar
+// get-carline-line dapat membaca data dari kedua kolom (backward compat).
+
+import { NextRequest, NextResponse } from 'next/server';
+import pool from '@/lib/db';
+
+export async function POST(request: NextRequest) {
+  const client = await pool.connect();
+  try {
+    const body = await request.json();
+
+    console.log('📥 [FA Save] Body received:', JSON.stringify({
+      userId:       body.userId,
+      categoryCode: body.categoryCode,
+      itemId:       body.itemId,
+      shift:        body.shift,
+      status:       body.status,
+      specificArea: body.specificArea,
+      carline:      body.carline,
+      line:         body.line,
+      conveyor:     body.conveyor,   // ← field baru
+      timeSlot:     body.timeSlot,
+    }));
+
+    const {
+      userId,
+      categoryCode,
+      itemId,
+      dateKey,
+      shift,
+      status,
+      ngDescription,
+      ngDepartment,
+      ngPhotos,
+      areaCode,
+      timeSlot = '',
+      carline,
+      line,
+      specificArea,
+      conveyor,   // ← field baru dari frontend
+    } = body;
+
+    if (!userId || !categoryCode || itemId === undefined || !dateKey || !shift || !status) {
+      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    }
+
+    const validStatuses = ['OK', 'NG', '-'];
+    if (!validStatuses.includes(status)) {
+      return NextResponse.json(
+        { error: `Invalid status. Must be: ${validStatuses.join(', ')}` },
+        { status: 400 }
+      );
+    }
+
+    await client.query('BEGIN');
+
+    // 1. Validasi user
+    const userRes = await client.query(
+      `SELECT nik FROM users WHERE id = $1 AND is_active = TRUE`,
+      [userId]
+    );
+    if (userRes.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return NextResponse.json({ error: 'Invalid user' }, { status: 403 });
+    }
+    const nik = userRes.rows[0].nik;
+
+    // 2. Get category_id
+    const catRes = await client.query(
+      `SELECT id FROM checklist_categories WHERE category_code = $1`,
+      [categoryCode]
+    );
+    if (catRes.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return NextResponse.json({ error: 'Category not found' }, { status: 404 });
+    }
+    const categoryId = catRes.rows[0].id;
+
+    // 3. Resolve area_id
+    let areaId: number | null = null;
+    if (areaCode) {
+      let areaRes = await client.query(
+        `SELECT id FROM checklist_areas
+         WHERE area_code = $1 AND category_id = $2 AND is_active = TRUE LIMIT 1`,
+        [areaCode, categoryId]
+      );
+      if ((areaRes.rowCount ?? 0) === 0) {
+        areaRes = await client.query(
+          `SELECT id FROM checklist_areas
+           WHERE area_code = $1 AND is_active = TRUE ORDER BY id ASC LIMIT 1`,
+          [areaCode]
+        );
+      }
+      if ((areaRes.rowCount ?? 0) > 0) {
+        areaId = areaRes.rows[0].id;
+      } else {
+        await client.query('ROLLBACK');
+        return NextResponse.json({ error: `Area not found: ${areaCode}` }, { status: 404 });
+      }
+    }
+
+    // 4. Resolve itemId → DB checklist_items.id (inspector: pakai shift A)
+    const rawItemId = Math.floor(
+      typeof itemId === 'number' ? itemId : parseFloat(itemId)
+    );
+    let actualItemId = rawItemId;
+
+    if (categoryCode === 'final-assy-inspector') {
+      const itemRes = await client.query(
+        `SELECT id FROM checklist_items
+         WHERE category_id = $1 AND item_no = $2 AND shift = 'A' AND is_active = TRUE
+         ORDER BY sort_order ASC, id ASC LIMIT 1`,
+        [categoryId, String(rawItemId)]
+      );
+      if ((itemRes.rowCount ?? 0) > 0) {
+        actualItemId = itemRes.rows[0].id;
+      } else {
+        const fallbackRes = await client.query(
+          `SELECT DISTINCT item_no, MIN(id) as first_id
+           FROM checklist_items
+           WHERE category_id = $1 AND shift = 'A' AND is_active = TRUE
+           GROUP BY item_no ORDER BY MIN(sort_order) ASC`,
+          [categoryId]
+        );
+        const map: Record<string, number> = {};
+        fallbackRes.rows.forEach((row: any) => {
+          map[String(row.item_no)] = parseInt(row.first_id);
+        });
+        if (map[String(rawItemId)]) actualItemId = map[String(rawItemId)];
+      }
+    }
+
+    // 5. Normalize nilai
+    const gaugeId         = (typeof timeSlot === 'string') ? timeSlot.trim() : '';
+    const ngPhotosVal     = ngPhotos ? JSON.stringify(ngPhotos) : null;
+    const ngDescVal       = ngDescription?.trim() || null;
+    const ngDeptVal       = ngDepartment?.trim()  || null;
+    const specificAreaVal = (typeof specificArea === 'string' && specificArea.trim())
+      ? specificArea.trim() : null;
+
+    // ✅ Conveyor normalization:
+    // Frontend mengirim `conveyor` (field baru) DAN `carline` (compat lama).
+    // Jika conveyor ada → gunakan sebagai nilai utama.
+    // carlineVal diisi dengan nilai conveyor juga (agar query lama tetap bisa filter).
+    // lineVal dibiarkan null/kosong karena sudah tidak relevan.
+    const normalizedConveyor = (typeof conveyor === 'string' && conveyor.trim())
+      ? conveyor.trim().toUpperCase()
+      : (typeof carline === 'string' && carline.trim())
+        ? carline.trim().toUpperCase()
+        : null;
+
+    const carlineVal    = normalizedConveyor;   // isi carline = conveyor (compat)
+    const lineVal: null = null;                  // line selalu null untuk conveyor mode
+
+    console.log(
+      `✅ [FA Save] gaugeId="${gaugeId}" specificArea="${specificAreaVal}" ` +
+      `conveyor="${normalizedConveyor}"`
+    );
+
+    // 6. Handle DELETE
+    if (status === '-') {
+      await client.query(
+        `DELETE FROM checklist_results
+         WHERE user_id     = $1
+           AND category_id = $2
+           AND item_id     = $3
+           AND date_key    = $4
+           AND shift       = $5
+           AND COALESCE(area_id,       -1) = COALESCE($6, -1)
+           AND COALESCE(carline,       '') = COALESCE($7, '')
+           AND COALESCE(line,          '') = COALESCE($8, '')
+           AND COALESCE(specific_area, '') = COALESCE($9, '')`,
+        [userId, categoryId, actualItemId, dateKey, shift,
+         areaId, carlineVal, lineVal, specificAreaVal]
+      );
+      await client.query('COMMIT');
+      return NextResponse.json({ success: true, deleted: true });
+    }
+
+    // 7. VALIDASI DUPLIKAT GAUGE
+    if (categoryCode === 'final-assy-inspector' && gaugeId !== '') {
+      const dupRes = await client.query(
+        `SELECT
+           r.id, r.carline, r.line, r.conveyor, r.specific_area,
+           ca.area_name, ci.item_check
+         FROM checklist_results r
+         LEFT JOIN checklist_areas ca ON r.area_id = ca.id
+         LEFT JOIN checklist_items  ci ON r.item_id = ci.id
+         WHERE r.user_id     = $1
+           AND r.category_id = $2
+           AND r.time_slot   = $3
+           AND r.date_key    = $4
+           AND r.shift       = $5
+           AND NOT (
+             COALESCE(r.area_id,           -1) = COALESCE($6,  -1)
+             AND COALESCE(r.carline,       '') = COALESCE($7,  '')
+             AND COALESCE(r.line,          '') = COALESCE($8,  '')
+             AND COALESCE(r.specific_area, '') = COALESCE($9,  '')
+           )
+         LIMIT 3`,
+        [userId, categoryId, gaugeId, dateKey, shift,
+         areaId, carlineVal, lineVal, specificAreaVal]
+      );
+
+      if ((dupRes.rowCount ?? 0) > 0) {
+        const duplicates = dupRes.rows.map((row: any) => {
+          const parts: string[] = [];
+          if (row.area_name) parts.push(row.area_name);
+          // Tampilkan conveyor atau carline sebagai label lokasi
+          const cvLabel = row.conveyor || row.carline;
+          if (cvLabel) parts.push(cvLabel);
+          if (row.specific_area) parts.push(row.specific_area);
+          return {
+            description:  parts.join(' / '),
+            areaName:     row.area_name     || null,
+            conveyor:     row.conveyor      || row.carline || null,
+            carline:      row.carline       || null,
+            line:         row.line          || null,
+            specificArea: row.specific_area || null,
+            itemCheck:    row.item_check    || null,
+          };
+        });
+        await client.query('ROLLBACK');
+        return NextResponse.json({ error: 'DUPLICATE_ITEM', duplicates }, { status: 409 });
+      }
+    }
+
+    // 8. UPSERT — cek existing row berdasarkan lokasi
+    const existingRow = await client.query(
+      `SELECT id FROM checklist_results
+       WHERE user_id     = $1
+         AND category_id = $2
+         AND item_id     = $3
+         AND date_key    = $4
+         AND shift       = $5
+         AND COALESCE(area_id,       -1) = COALESCE($6, -1)
+         AND COALESCE(carline,       '') = COALESCE($7, '')
+         AND COALESCE(line,          '') = COALESCE($8, '')
+         AND COALESCE(specific_area, '') = COALESCE($9, '')
+       LIMIT 1`,
+      [userId, categoryId, actualItemId, dateKey, shift,
+       areaId, carlineVal, lineVal, specificAreaVal]
+    );
+
+    if ((existingRow.rowCount ?? 0) > 0) {
+      // UPDATE — update juga kolom conveyor
+      await client.query(
+        `UPDATE checklist_results SET
+          status         = $1,
+          ng_description = $2,
+          ng_department  = $3,
+          ng_photos      = $4,
+          time_slot      = $5,
+          conveyor       = $6,
+          updated_at     = NOW()
+         WHERE id = $7`,
+        [status, ngDescVal, ngDeptVal, ngPhotosVal, gaugeId,
+         normalizedConveyor, existingRow.rows[0].id]
+      );
+      console.log(
+        `✅ [FA Save] UPDATE id=${existingRow.rows[0].id} ` +
+        `item=${actualItemId} shift=${shift} conveyor="${normalizedConveyor}"`
+      );
+    } else {
+      // INSERT — sertakan kolom conveyor
+      await client.query(
+        `INSERT INTO checklist_results (
+          user_id, nik, category_id, item_id,
+          date_key, shift, time_slot, status,
+          ng_description, ng_department, ng_photos,
+          area_id, carline, line, conveyor, specific_area,
+          submitted_at, created_at, updated_at
+        ) VALUES (
+          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
+          NOW(),NOW(),NOW()
+        )
+        ON CONFLICT (
+          user_id, category_id, item_id, date_key, shift,
+          COALESCE(time_slot,     ''::character varying),
+          COALESCE(area_id,       '-1'::integer),
+          COALESCE(carline,       ''::character varying),
+          COALESCE(line,          ''::character varying),
+          COALESCE(specific_area, ''::character varying)
+        )
+        DO UPDATE SET
+          status         = EXCLUDED.status,
+          ng_description = EXCLUDED.ng_description,
+          ng_department  = EXCLUDED.ng_department,
+          ng_photos      = EXCLUDED.ng_photos,
+          time_slot      = EXCLUDED.time_slot,
+          specific_area  = EXCLUDED.specific_area,
+          conveyor       = EXCLUDED.conveyor,
+          carline        = EXCLUDED.carline,
+          updated_at     = NOW()`,
+        [
+          userId, nik, categoryId, actualItemId,
+          dateKey, shift, gaugeId, status,
+          ngDescVal, ngDeptVal, ngPhotosVal,
+          areaId, carlineVal, lineVal, normalizedConveyor, specificAreaVal,
+        ]
+      );
+      console.log(
+        `✅ [FA Save] INSERT item=${actualItemId} shift=${shift} ` +
+        `conveyor="${normalizedConveyor}" specific_area="${specificAreaVal}"`
+      );
+    }
+
+    await client.query('COMMIT');
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        userId, categoryId, itemId: actualItemId, rawItemId,
+        dateKey, shift, status, areaId,
+        specificArea: specificAreaVal,
+        conveyor:     normalizedConveyor,
+        gaugeId,
+      },
+    });
+
+  } catch (err: any) {
+    await client.query('ROLLBACK');
+    console.error('❌ FA SAVE RESULT ERROR:', err.message, err.code);
+    if (err.code === '23505') {
+      return NextResponse.json({ error: 'Duplicate record', detail: err.detail }, { status: 409 });
+    }
+    return NextResponse.json(
+      { error: 'Failed to save result', detail: err.message },
+      { status: 500 }
+    );
+  } finally {
+    client.release();
+  }
+}
+
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin':  '*',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    },
+  });
+}
+
+// app/api/final-assy/save-signature/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import pool from '@/lib/db';
+
+interface User {
+  id: string;
+  username: string;
+  full_name: string;
+  nik: string;
+  department: string;
+  role: string;
+}
+
+interface Category {
+  id: number;
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const { userId, categoryCode, dateKey, shift, signatureStatus, tableType, areaCode } = body;
+
+    // Validasi required fields
+    if (!userId || !categoryCode || !dateKey || !shift || !signatureStatus) {
+      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    }
+
+    // =========================================================
+    // 🔹 VALIDASI USER
+    // =========================================================
+    const users = await pool.query<User>(
+      'SELECT id, username, full_name, nik, department, role FROM users WHERE id = $1 AND is_active = TRUE',
+      [userId]
+    );
+
+    if (users.rows.length === 0) {
+      return NextResponse.json({ error: 'Invalid user ID' }, { status: 403 });
+    }
+
+    const nik = users.rows[0].nik;
+
+    // =========================================================
+    // 🔹 VALIDASI CATEGORY
+    // =========================================================
+    const categories = await pool.query<Category>(
+      'SELECT id FROM checklist_categories WHERE category_code = $1',
+      [categoryCode]
+    );
+
+    if (categories.rows.length === 0) {
+      return NextResponse.json({
+        error: `Category "${categoryCode}" not found in database.`
+      }, { status: 404 });
+    }
+
+    const categoryId = categories.rows[0].id;
+
+    // =========================================================
+    // 🔹 RESOLVE AREA_ID DARI AREA_CODE (OPTIONAL)
+    // =========================================================
+    let areaId: number | null = null;
+    if (areaCode) {
+      const areaResult = await pool.query(
+        `SELECT id FROM checklist_areas 
+         WHERE area_code = $1 AND category_id = $2 AND is_active = TRUE`,
+        [areaCode, categoryId]
+      );
+      if (areaResult.rows.length > 0) {
+        areaId = areaResult.rows[0].id;
+      }
+    }
+
+    // =========================================================
+    // 🔹 JIKA STATUS = "-", HAPUS DARI DATABASE
+    // =========================================================
+    if (signatureStatus === '-') {
+      if (areaId !== null) {
+        // Delete dengan filter area_id (match area_id yang sama atau NULL)
+        await pool.query(
+          `DELETE FROM checklist_signatures 
+           WHERE user_id = $1 
+             AND category_id = $2 
+             AND date_key = $3 
+             AND shift = $4 
+             AND (area_id = $5 OR area_id IS NULL)`,
+          [userId, categoryId, dateKey, shift, areaId]
+        );
+      } else {
+        // Delete tanpa filter area_id (hanya record dengan area_id NULL)
+        await pool.query(
+          `DELETE FROM checklist_signatures 
+           WHERE user_id = $1 
+             AND category_id = $2 
+             AND date_key = $3 
+             AND shift = $4 
+             AND area_id IS NULL`,
+          [userId, categoryId, dateKey, shift]
+        );
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: 'Signature berhasil dihapus',
+        deleted: true
+      });
+    }
+
+    // =========================================================
+    // 🔹 JIKA STATUS = "OK", SIMPAN/UPDATE KE DATABASE
+    // =========================================================
+    
+    // Cek existing signature dengan filter area_id yang konsisten
+    let existing;
+    if (areaId !== null) {
+      existing = await pool.query(
+        `SELECT id FROM checklist_signatures 
+         WHERE user_id = $1 
+           AND category_id = $2 
+           AND date_key = $3 
+           AND shift = $4 
+           AND (area_id = $5 OR area_id IS NULL)`,
+        [userId, categoryId, dateKey, shift, areaId]
+      );
+    } else {
+      existing = await pool.query(
+        `SELECT id FROM checklist_signatures 
+         WHERE user_id = $1 
+           AND category_id = $2 
+           AND date_key = $3 
+           AND shift = $4 
+           AND area_id IS NULL`,
+        [userId, categoryId, dateKey, shift]
+      );
+    }
+
+    if (existing.rows.length > 0) {
+      // ✅ UPDATE: Update existing signature dengan area_id
+      await pool.query(
+        `UPDATE checklist_signatures 
+         SET signature_status = $1, 
+             area_id = $2, 
+             updated_at = CURRENT_TIMESTAMP
+         WHERE user_id = $3 
+           AND category_id = $4 
+           AND date_key = $5 
+           AND shift = $6`,
+        [signatureStatus, areaId, userId, categoryId, dateKey, shift]
+      );
+
+      return NextResponse.json({
+        success: true,
+        message: 'Signature berhasil diupdate',
+        areaId,
+        action: 'updated'
+      });
+    } else {
+      // ✅ INSERT: Insert new signature dengan area_id
+      await pool.query(
+        `INSERT INTO checklist_signatures 
+         (user_id, nik, category_id, date_key, shift, signature_status, area_id, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)`,
+        [userId, nik, categoryId, dateKey, shift, signatureStatus, areaId]
+      );
+
+      return NextResponse.json({
+        success: true,
+        message: 'Signature berhasil disimpan',
+        areaId,
+        action: 'inserted'
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ Save signature error:', error);
+    return NextResponse.json({
+      error: 'Gagal menyimpan signature ke database',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    }, { status: 500 });
+  }
+}
+
+// app/api/gauges/checkpoints/get/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import pool from '@/lib/db';
+
+function checkAuth(request: NextRequest) {
+  const sessionToken = request.headers.get('authorization') || request.headers.get('x-session-token');
+  if (!sessionToken) {
+    const token = request.cookies.get('auth_session_token')?.value;
+    if (token) return { authenticated: true };
+    return { authenticated: false };
+  }
+  return { authenticated: true };
+}
+
+export async function GET(request: NextRequest) {
+  const auth = checkAuth(request);
+  if (!auth.authenticated) {
+    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+  }
+
+  try {
+    const { searchParams } = new URL(request.url);
+    const gaugeId = searchParams.get('gaugeId');
+    const dateKey = searchParams.get('dateKey');
+    const shift = searchParams.get('shift');
+
+    if (!gaugeId || !dateKey || !shift) {
+      return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
+    }
+
+    console.log('🔍 [Checkpoint Results] Fetching for:', { gaugeId, dateKey, shift });
+
+    const result = await pool.query(
+      `SELECT 
+        gcr.checkpoint_id,
+        gc.checkpoint_name,
+        gcr.status,
+        gcr.notes,
+        gcr.checked_at
+       FROM gauge_checkpoint_results gcr
+       JOIN gauge_checkpoints gc ON gcr.checkpoint_id = gc.id
+       WHERE gcr.gauge_id = $1 
+         AND gcr.date_key = $2 
+         AND gcr.shift = $3
+       ORDER BY gc.checkpoint_order ASC`,
+      [gaugeId, dateKey, shift]
+    );
+
+    console.log('✅ [Checkpoint Results] Found:', result.rows.length);
+
+    return NextResponse.json({
+      success: true,
+      checkpointResults: result.rows.map(row => ({
+        checkpointId: row.checkpoint_id,
+        checkpointName: row.checkpoint_name,
+        status: row.status,
+        notes: row.notes,
+        checkedAt: row.checked_at
+      }))
+    });
+  } catch (error) {
+    console.error('❌ [Checkpoint Results] Error:', error);
+    return NextResponse.json({ error: 'Server error' }, { status: 500 });
+  }
+}
+
+export async function OPTIONS(request: NextRequest) {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Session-Token',
+    },
+  });
+}
+
+// app/api/gauges/checkpoints/save/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import pool from '@/lib/db';
+
+// =====================================================================
+// === TYPE DEFINITIONS ===
+// =====================================================================
+interface CheckpointResultInput {
+  checkpointId: string;
+  checkpointName: string;
+  status: '-' | 'OK' | 'NG';
+  notes?: string;
+}
+
+interface SaveCheckpointRequestBody {
+  gaugeId: string;
+  gaugeType: string;
+  userId: string;
+  nik: string;
+  dateKey: string;      // YYYY-MM-DD
+  shift: 'A' | 'B';
+  checkpointResults: CheckpointResultInput[];
+}
+
+// =====================================================================
+// === AUTHENTICATION CHECK HELPER ===
+// =====================================================================
+function checkAuth(request: NextRequest): { authenticated: boolean; userId?: string; error?: string } {
+  try {
+    const sessionToken = request.headers.get('authorization') || 
+                         request.headers.get('x-session-token');
+    
+    if (!sessionToken) {
+      const cookies = request.cookies;
+      const token = cookies.get('auth_session_token')?.value;
+      if (token) {
+        return { authenticated: true };
+      }
+      
+      return { 
+        authenticated: false, 
+        error: 'Unauthorized - No session token found' 
+      };
+    }
+    
+    return { authenticated: true };
+  } catch (error) {
+    console.error('❌ Auth check error:', error);
+    return { 
+      authenticated: false, 
+      error: 'Authentication check failed' 
+    };
+  }
+}
+
+// =====================================================================
+// === MAIN API HANDLER - SAVE CHECKPOINT RESULTS ===
+// =====================================================================
+export async function POST(request: NextRequest) {
+  const client = await pool.connect();
+  
+  try {
+    // ✅ STEP 1: Authentication Check
+    const auth = checkAuth(request);
+    if (!auth.authenticated) {
+      console.warn('🚫 Unauthorized access attempt to /api/gauges/checkpoints/save');
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'Unauthorized',
+          message: 'Silakan login kembali'
+        }, 
+        { status: 401 }
+      );
+    }
+    
+    // ✅ STEP 2: Parse request body
+    const body: SaveCheckpointRequestBody = await request.json();
+    const {
+      gaugeId,
+      gaugeType,
+      userId,
+      nik,
+      dateKey,
+      shift,
+      checkpointResults
+    } = body;
+    
+    // ✅ STEP 3: Validate required fields
+    if (!gaugeId || !userId || !dateKey || !shift || !checkpointResults?.length) {
+      console.warn('⚠️ Missing required fields:', { gaugeId, userId, dateKey, shift, checkpointCount: checkpointResults?.length });
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'Missing required fields',
+          message: 'Field gaugeId, userId, dateKey, shift, dan checkpointResults wajib diisi'
+        }, 
+        { status: 400 }
+      );
+    }
+    
+    console.log('💾 [Save Checkpoints] Saving results:', {
+      gaugeId,
+      gaugeType,
+      userId,
+      dateKey,
+      shift,
+      checkpointCount: checkpointResults.length
+    });
+    
+    // ✅ STEP 4: Begin transaction
+    await client.query('BEGIN');
+    
+    // ✅ STEP 5: Validasi gauge exists dan active
+    const gaugeCheck = await client.query(
+      'SELECT id, gauge_code, gauge_type, is_active FROM gauges WHERE id = $1',
+      [gaugeId]
+    );
+    
+    if (gaugeCheck.rows.length === 0) {
+      await client.query('ROLLBACK');
+      console.error('❌ Gauge not found:', gaugeId);
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'Gauge tidak ditemukan',
+          message: `Gauge dengan ID "${gaugeId}" tidak ditemukan`
+        }, 
+        { status: 404 }
+      );
+    }
+    
+    if (!gaugeCheck.rows[0].is_active) {
+      await client.query('ROLLBACK');
+      console.error('❌ Gauge not active:', gaugeId);
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'Gauge tidak aktif',
+          message: `Gauge "${gaugeCheck.rows[0].gauge_code}" tidak aktif`
+        }, 
+        { status: 400 }
+      );
+    }
+    
+    // ✅ STEP 6: Validasi gauge_type match
+    if (gaugeCheck.rows[0].gauge_type !== gaugeType) {
+      console.warn('⚠️ Gauge type mismatch:', {
+        expected: gaugeType,
+        actual: gaugeCheck.rows[0].gauge_type
+      });
+      // Tidak reject, hanya warning (bisa diperketat nanti)
+    }
+    
+    // ✅ STEP 7: UPSERT setiap checkpoint result
+    const savedResults: any[] = [];
+    
+    for (const item of checkpointResults) {
+      const { checkpointId, checkpointName, status, notes } = item;
+      
+      // Validasi checkpoint exists
+      const checkpointCheck = await client.query(
+        'SELECT id, gauge_type, is_active FROM gauge_checkpoints WHERE id = $1',
+        [checkpointId]
+      );
+      
+      if (checkpointCheck.rows.length === 0) {
+        console.warn('⚠️ Checkpoint not found:', checkpointId);
+        continue; // Skip checkpoint yang tidak ditemukan
+      }
+      
+      if (!checkpointCheck.rows[0].is_active) {
+        console.warn('⚠️ Checkpoint not active:', checkpointId);
+        continue; // Skip checkpoint yang tidak aktif
+      }
+      
+      // UPSERT: Insert atau Update jika sudah ada
+      const upsertQuery = `
+        INSERT INTO gauge_checkpoint_results 
+        (gauge_id, checkpoint_id, user_id, nik, date_key, shift, status, notes, checked_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+        ON CONFLICT (gauge_id, checkpoint_id, date_key, shift)
+        DO UPDATE SET
+          status = EXCLUDED.status,
+          notes = EXCLUDED.notes,
+          user_id = EXCLUDED.user_id,
+          nik = EXCLUDED.nik,
+          checked_at = NOW()
+        RETURNING id, status, checked_at
+      `;
+      
+      const upsertResult = await client.query(upsertQuery, [
+        gaugeId,
+        checkpointId,
+        userId,
+        nik,
+        dateKey,
+        shift,
+        status,
+        notes || null
+      ]);
+      
+      savedResults.push({
+        checkpointId,
+        checkpointName,
+        status,
+        savedId: upsertResult.rows[0]?.id,
+        checkedAt: upsertResult.rows[0]?.checked_at
+      });
+    }
+    
+    // ✅ STEP 8: Commit transaction
+    await client.query('COMMIT');
+    
+    console.log('✅ [Save Checkpoints] Successfully saved:', savedResults.length, 'checkpoint results');
+    
+    // ✅ STEP 9: Calculate summary
+    const summary = {
+      total: checkpointResults.length,
+      ok: checkpointResults.filter(r => r.status === 'OK').length,
+      ng: checkpointResults.filter(r => r.status === 'NG').length,
+      pending: checkpointResults.filter(r => r.status === '-').length
+    };
+    
+    // ✅ STEP 10: Return success response
+    return NextResponse.json({
+      success: true,
+      message: 'Checkpoint results saved successfully',
+      saved: savedResults.length,
+      summary,
+      gauge: {
+        id: gaugeId,
+        type: gaugeType,
+        code: gaugeCheck.rows[0].gauge_code
+      }
+    });
+    
+  } catch (error: any) {
+    // ✅ STEP 11: Rollback on error
+    await client.query('ROLLBACK');
+    
+    console.error('❌ [Save Checkpoints] Error:', error.message);
+    console.error('Stack:', error.stack);
+    
+    return NextResponse.json(
+      {
+        success: false,
+        error: 'Gagal menyimpan hasil checkpoint',
+        message: error.message || 'Terjadi kesalahan pada server',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      }, 
+      { status: 500 }
+    );
+  } finally {
+    // ✅ STEP 12: Release client
+    client.release();
+  }
+}
+
+// =====================================================================
+// === OPTIONS HANDLER (for CORS if needed) ===
+// =====================================================================
+export async function OPTIONS(request: NextRequest) {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Session-Token',
+    },
+  });
+}
+
+// app/api/gauges/checkpoints/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import pool from '@/lib/db';
+
+// =====================================================================
+// === AUTHENTICATION CHECK HELPER ===
+// =====================================================================
+function checkAuth(request: NextRequest): { authenticated: boolean; userId?: string; error?: string } {
+  try {
+    // Check session token dari header atau localStorage (via cookie)
+    const sessionToken = request.headers.get('authorization') || 
+                         request.headers.get('x-session-token');
+    
+    // Jika tidak ada token, cek dari cookies (jika ada)
+    if (!sessionToken) {
+      const cookies = request.cookies;
+      const token = cookies.get('auth_session_token')?.value;
+      if (token) {
+        return { authenticated: true };
+      }
+      
+      // ⚠️ Untuk development, bisa bypass auth (HAPUS di production!)
+      // return { authenticated: true };
+      
+      return { 
+        authenticated: false, 
+        error: 'Unauthorized - No session token found' 
+      };
+    }
+    
+    // Validasi token format (optional - bisa diperkuat dengan JWT verification)
+    if (!sessionToken.startsWith('sess_')) {
+      console.warn('⚠️ Invalid token format:', sessionToken.substring(0, 10) + '...');
+      // Tetap allow untuk sekarang (bisa diperketat nanti)
+    }
+    
+    return { authenticated: true };
+  } catch (error) {
+    console.error('❌ Auth check error:', error);
+    return { 
+      authenticated: false, 
+      error: 'Authentication check failed' 
+    };
+  }
+}
+
+// =====================================================================
+// === MAIN API HANDLER - GET CHECKPOINTS ===
+// =====================================================================
+export async function GET(request: NextRequest) {
+  // ✅ STEP 1: Authentication Check
+  const auth = checkAuth(request);
+  if (!auth.authenticated) {
+    console.warn('🚫 Unauthorized access attempt to /api/gauges/checkpoints');
+    return NextResponse.json(
+      { 
+        success: false, 
+        error: 'Unauthorized',
+        message: 'Silakan login kembali'
+      }, 
+      { status: 401 }
+    );
+  }
+  
+  try {
+    // ✅ STEP 2: Parse query parameters
+    const { searchParams } = new URL(request.url);
+    const gaugeType = searchParams.get('gaugeType');
+    
+    // Validate gaugeType parameter
+    if (!gaugeType) {
+      console.warn('⚠️ Missing gaugeType parameter');
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'Missing gaugeType parameter',
+          message: 'Parameter gaugeType wajib diisi'
+        }, 
+        { status: 400 }
+      );
+    }
+    
+    // ✅ STEP 3: Log request for debugging
+    console.log('🔍 [Checkpoints API] Fetching checkpoints for gauge_type:', gaugeType);
+    
+    // ✅ STEP 4: Query database
+    const result = await pool.query(
+      `SELECT 
+        id,
+        gauge_type,
+        checkpoint_name,
+        checkpoint_order,
+        is_required,
+        is_active,
+        created_at,
+        updated_at
+       FROM gauge_checkpoints
+       WHERE gauge_type = $1 AND is_active = TRUE
+       ORDER BY checkpoint_order ASC`,
+      [gaugeType]
+    );
+    
+    // ✅ STEP 5: Handle no checkpoints found
+    if (result.rows.length === 0) {
+      console.warn('⚠️ [Checkpoints API] No checkpoints found for gauge_type:', gaugeType);
+      return NextResponse.json(
+        { 
+          success: true,
+          checkpoints: [],
+          message: `Tidak ada checklist untuk gauge type "${gaugeType}"`
+        }, 
+        { status: 200 }
+      );
+    }
+    
+    // ✅ STEP 6: Return success response
+    console.log('✅ [Checkpoints API] Checkpoints found:', result.rows.length);
+    
+    return NextResponse.json({
+      success: true,
+      checkpoints: result.rows.map(row => ({
+        id: row.id,
+        gauge_type: row.gauge_type,
+        checkpoint_name: row.checkpoint_name,
+        checkpoint_order: row.checkpoint_order,
+        is_required: row.is_required,
+        is_active: row.is_active
+      }))
+    });
+    
+  } catch (error) {
+    // ✅ STEP 7: Error handling
+    console.error('❌ [Checkpoints API] Get checkpoints error:', error);
+    
+    return NextResponse.json(
+      {
+        success: false,
+        error: 'Server error',
+        message: 'Terjadi kesalahan pada server',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      }, 
+      { status: 500 }
+    );
+  }
+}
+
+// =====================================================================
+// === OPTIONS HANDLER (for CORS if needed) ===
+// =====================================================================
+export async function OPTIONS(request: NextRequest) {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Session-Token',
+    },
+  });
+}
+
+// app/api/gauges/get-by-code/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import pool from '@/lib/db';
+
+// =====================================================================
+// === AUTHENTICATION CHECK HELPER ===
+// =====================================================================
+function checkAuth(request: NextRequest): { authenticated: boolean; userId?: string; error?: string } {
+  try {
+    // Check session token dari header atau localStorage (via cookie)
+    const sessionToken = request.headers.get('authorization') || 
+                         request.headers.get('x-session-token');
+    
+    // Jika tidak ada token, cek dari cookies (jika ada)
+    if (!sessionToken) {
+      const cookies = request.cookies;
+      const token = cookies.get('auth_session_token')?.value;
+      if (token) {
+        return { authenticated: true };
+      }
+      
+      // ⚠️ Untuk development, bisa bypass auth (HAPUS di production!)
+      // return { authenticated: true };
+      
+      return { 
+        authenticated: false, 
+        error: 'Unauthorized - No session token found' 
+      };
+    }
+    
+    // Validasi token format (optional - bisa diperkuat dengan JWT verification)
+    if (!sessionToken.startsWith('sess_')) {
+      console.warn('⚠️ Invalid token format:', sessionToken.substring(0, 10) + '...');
+      // Tetap allow untuk sekarang (bisa diperketat nanti)
+    }
+    
+    return { authenticated: true };
+  } catch (error) {
+    console.error('❌ Auth check error:', error);
+    return { 
+      authenticated: false, 
+      error: 'Authentication check failed' 
+    };
+  }
+}
+
+// =====================================================================
+// === MAIN API HANDLER ===
+// =====================================================================
+export async function GET(request: NextRequest) {
+  // ✅ STEP 1: Authentication Check
+  const auth = checkAuth(request);
+  if (!auth.authenticated) {
+    console.warn('🚫 Unauthorized access attempt to /api/gauges/get-by-code');
+    return NextResponse.json(
+      {
+        success: false,
+        error: 'Unauthorized',
+        message: 'Silakan login kembali'
+      },
+      { status: 401 }
+    );
+  }
+  
+  try {
+    // ✅ STEP 2: Parse query parameters
+    const { searchParams } = new URL(request.url);
+    const gaugeCode = searchParams.get('gaugeCode');
+    
+    // Validate gaugeCode parameter
+    if (!gaugeCode) {
+      console.warn('⚠️ Missing gaugeCode parameter');
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'Missing gaugeCode parameter',
+          message: 'Parameter gaugeCode wajib diisi'
+        }, 
+        { status: 400 }
+      );
+    }
+    
+    // ✅ STEP 3: Log request for debugging
+    console.log('🔍 [Gauge API] Fetching gauge:', gaugeCode);
+    
+    // ✅ STEP 4: Query database
+    const result = await pool.query(
+      `SELECT 
+        g.id,
+        g.gauge_code,
+        g.gauge_type,
+        g.gauge_name,
+        g.category_id,
+        g.area_id,
+        g.calibration_due,
+        g.is_active,
+        ca.area_name,
+        ca.area_code
+       FROM gauges g
+       LEFT JOIN checklist_areas ca ON g.area_id = ca.id
+       WHERE g.gauge_code = $1 AND g.is_active = TRUE`,
+      [gaugeCode]
+    );
+    
+    // ✅ STEP 5: Handle not found
+    if (result.rows.length === 0) {
+      console.warn('⚠️ [Gauge API] Gauge not found:', gaugeCode);
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'Gauge tidak ditemukan',
+          message: `Gauge dengan kode "${gaugeCode}" tidak ditemukan atau tidak aktif`
+        }, 
+        { status: 404 }
+      );
+    }
+    
+    // ✅ STEP 6: Return success response
+    const gauge = result.rows[0];
+    console.log('✅ [Gauge API] Gauge found:', gauge.gauge_code, gauge.gauge_name);
+    
+    return NextResponse.json({
+      success: true,
+      gauge: {
+        id: gauge.id,
+        gauge_code: gauge.gauge_code,
+        gauge_type: gauge.gauge_type,
+        gauge_name: gauge.gauge_name,
+        category_id: gauge.category_id,
+        area_id: gauge.area_id,
+        calibration_due: gauge.calibration_due,
+        is_active: gauge.is_active,
+        area_name: gauge.area_name,
+        area_code: gauge.area_code
+      }
+    });
+    
+  } catch (error) {
+    // ✅ STEP 7: Error handling
+    console.error('❌ [Gauge API] Get gauge error:', error);
+    
+    return NextResponse.json(
+      {
+        success: false,
+        error: 'Server error',
+        message: 'Terjadi kesalahan pada server',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      }, 
+      { status: 500 }
+    );
+  }
+}
+
+// =====================================================================
+// === OPTIONS HANDLER (for CORS if needed) ===
+// =====================================================================
+export async function OPTIONS(request: NextRequest) {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Session-Token',
+    },
+  });
+}
+
+// app/api/gauges/get-by-gauge-id/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import pool from '@/lib/db';
+
+function checkAuth(request: NextRequest) {
+  const sessionToken = request.headers.get('authorization') || request.headers.get('x-session-token');
+  if (!sessionToken) {
+    const token = request.cookies.get('auth_session_token')?.value;
+    if (token) return { authenticated: true };
+    return { authenticated: false };
+  }
+  return { authenticated: true };
+}
+
+export async function GET(request: NextRequest) {
+  const auth = checkAuth(request);
+  if (!auth.authenticated) {
+    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+  }
+
+  try {
+    const { searchParams } = new URL(request.url);
+    const gaugeId = searchParams.get('gaugeId');
+
+    if (!gaugeId) {
+      return NextResponse.json({ error: 'Missing gaugeId parameter' }, { status: 400 });
+    }
+
+    const result = await pool.query(
+      `SELECT 
+        g.id,
+        g.gauge_code,
+        g.gauge_type,
+        g.gauge_name,
+        g.category_id,
+        g.area_id,
+        g.calibration_due,
+        g.is_active,
+        ca.area_name,
+        ca.area_code
+       FROM gauges g
+       LEFT JOIN checklist_areas ca ON g.area_id = ca.id
+       WHERE g.id = $1 AND g.is_active = TRUE`,
+      [gaugeId]
+    );
+
+    if (result.rows.length === 0) {
+      return NextResponse.json({ success: false, error: 'Gauge not found' }, { status: 404 });
+    }
+
+    return NextResponse.json({
+      success: true,
+      gauge: result.rows[0]
+    });
+  } catch (error) {
+    console.error('❌ Get gauge by ID error:', error);
+    return NextResponse.json({ error: 'Server error' }, { status: 500 });
+  }
+}
+
+export async function OPTIONS(request: NextRequest) {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Session-Token',
+    },
+  });
+}
+
+// app/api/gauges/get-inspection/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import pool from '@/lib/db';
+
+export async function GET(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const gaugeId = searchParams.get('gaugeId');
+    const dateKey = searchParams.get('dateKey');
+    const shift = searchParams.get('shift');
+
+    if (!gaugeId || !dateKey || !shift) {
+      return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
+    }
+
+    const result = await pool.query(
+      `SELECT 
+        gi.id,
+        gi.gauge_id,
+        gi.user_id,
+        gi.date_key,
+        gi.shift,
+        gi.status,
+        gi.ng_description,
+        gi.ng_department,
+        gi.scanned_at,
+        u.full_name as scanned_by
+       FROM gauge_inspections gi
+       LEFT JOIN users u ON gi.user_id = u.id
+       WHERE gi.gauge_id = $1 AND gi.date_key = $2 AND gi.shift = $3`,
+      [gaugeId, dateKey, shift]
+    );
+
+    return NextResponse.json({
+      success: true,
+      inspection: result.rows[0] || null
+    });
+
+  } catch (error) {
+    console.error('❌ Get inspection error:', error);
+    return NextResponse.json({ 
+      error: 'Server error'
+    }, { status: 500 });
+  }
+}
+
+// app/api/gauges/save-inspection/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import pool from '@/lib/db';
+
+export async function POST(request: NextRequest) {
+  const client = await pool.connect();
+  
+  try {
+    const body = await request.json();
+    const { 
+      gaugeId, 
+      userId, 
+      nik, 
+      dateKey, 
+      shift, 
+      status, 
+      ngDescription, 
+      ngDepartment 
+    } = body;
+
+    if (!gaugeId || !userId || !dateKey || !shift || !status) {
+      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    }
+
+    await client.query('BEGIN');
+
+    // Validasi gauge
+    const gaugeCheck = await client.query(
+      'SELECT id, is_active FROM gauges WHERE id = $1',
+      [gaugeId]
+    );
+
+    if (gaugeCheck.rows.length === 0) {
+      throw new Error('Gauge tidak ditemukan');
+    }
+
+    if (!gaugeCheck.rows[0].is_active) {
+      throw new Error('Gauge tidak aktif');
+    }
+
+    // UPSERT: Insert atau Update jika sudah ada
+    if (status === '-') {
+      // Delete jika status "-"
+      await client.query(
+        `DELETE FROM gauge_inspections
+         WHERE gauge_id = $1 AND date_key = $2 AND shift = $3`,
+        [gaugeId, dateKey, shift]
+      );
+
+      await client.query('COMMIT');
+      return NextResponse.json({ 
+        success: true, 
+        message: 'Inspeksi dihapus',
+        deleted: true
+      });
+
+    } else {
+      // Insert atau Update
+      await client.query(
+        `INSERT INTO gauge_inspections 
+         (gauge_id, user_id, date_key, shift, status, ng_description, ng_department, scanned_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+         ON CONFLICT (gauge_id, date_key, shift)
+         DO UPDATE SET
+           status = EXCLUDED.status,
+           ng_description = EXCLUDED.ng_description,
+           ng_department = EXCLUDED.ng_department,
+           scanned_at = NOW()`,
+        [gaugeId, userId, dateKey, shift, status, ngDescription || null, ngDepartment || null]
+      );
+
+      await client.query('COMMIT');
+      return NextResponse.json({ 
+        success: true, 
+        message: 'Inspeksi berhasil disimpan'
+      });
+    }
+
+  } catch (error: any) {
+    await client.query('ROLLBACK');
+    console.error('❌ Save inspection error:', error.message);
+    return NextResponse.json({ 
+      error: 'Gagal menyimpan inspeksi',
+      detail: error.message
+    }, { status: 500 });
+  } finally {
+    client.release();
+  }
+}
+
+// app/api/gauges/scanned-history/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import pool from '@/lib/db';
+
+function checkAuth(request: NextRequest): { authenticated: boolean; error?: string } {
+  try {
+    const sessionToken = request.headers.get('authorization') || request.headers.get('x-session-token');
+    if (!sessionToken) {
+      const token = request.cookies.get('auth_session_token')?.value;
+      if (token) return { authenticated: true };
+      return { authenticated: false, error: 'Unauthorized' };
+    }
+    return { authenticated: true };
+  } catch (error) {
+    return { authenticated: false, error: 'Authentication failed' };
+  }
+}
+
+export async function GET(request: NextRequest) {
+  const auth = checkAuth(request);
+  if (!auth.authenticated) {
+    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+  }
+
+  try {
+    const { searchParams } = new URL(request.url);
+    const dateKey = searchParams.get('dateKey');
+    const shift = searchParams.get('shift');
+    // ✅ areaCode TIDAK dipakai untuk filter — semua gauge ditampilkan
+
+    if (!dateKey || !shift) {
+      return NextResponse.json(
+        { success: false, error: 'Missing required parameters: dateKey, shift' },
+        { status: 400 }
+      );
+    }
+
+    console.log('🔍 [Scanned History] Fetching ALL gauges for:', { dateKey, shift });
+
+    // ✅ Query tanpa filter area — semua gauge yang sudah dicek hari ini
+    const query = `
+      SELECT 
+        g.id as gauge_id,
+        g.gauge_code,
+        g.gauge_type,
+        g.gauge_name,
+        g.area_id,
+        ca.area_code,
+        ca.area_name,
+        CASE 
+          WHEN COUNT(CASE WHEN gcr.status = 'NG' THEN 1 END) > 0 THEN 'NG'
+          WHEN COUNT(CASE WHEN gcr.status = '-' THEN 1 END) > 0 THEN '-'
+          ELSE 'OK'
+        END as overall_status,
+        COUNT(CASE WHEN gcr.status = 'NG' THEN 1 END) as ng_count,
+        COUNT(*) as checkpoint_count,
+        MAX(gcr.checked_at) as checked_at
+      FROM gauge_checkpoint_results gcr
+      JOIN gauges g ON gcr.gauge_id = g.id
+      JOIN gauge_checkpoints gc ON gcr.checkpoint_id = gc.id
+      LEFT JOIN checklist_areas ca ON g.area_id = ca.id
+      WHERE gcr.date_key = $1 
+        AND gcr.shift = $2
+      GROUP BY g.id, g.gauge_code, g.gauge_type, g.gauge_name, g.area_id, ca.area_code, ca.area_name
+      ORDER BY MAX(gcr.checked_at) DESC
+    `;
+
+    const result = await pool.query(query, [dateKey, shift]);
+
+    console.log('✅ [Scanned History] Results found:', result.rows.length);
+
+    return NextResponse.json({
+      success: true,
+      history: result.rows.map(row => ({
+        gauge_id: row.gauge_id,
+        gauge_code: row.gauge_code,
+        gauge_type: row.gauge_type,
+        gauge_name: row.gauge_name,
+        area_code: row.area_code,    // ✅ Tambah info area
+        area_name: row.area_name,    // ✅ Tambah info area
+        overall_status: row.overall_status,
+        has_ng: row.ng_count > 0,
+        checked_at: row.checked_at,
+        checkpoint_count: parseInt(row.checkpoint_count),
+        ng_count: parseInt(row.ng_count)
+      }))
+    });
+
+  } catch (error) {
+    console.error('❌ [Scanned History] Error:', error);
+    return NextResponse.json(
+      { success: false, error: 'Server error', details: error instanceof Error ? error.message : 'Unknown' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function OPTIONS(request: NextRequest) {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Session-Token',
+    },
+  });
+}

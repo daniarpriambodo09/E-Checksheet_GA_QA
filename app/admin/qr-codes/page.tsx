@@ -1239,7 +1239,7 @@ export default function AdminQRCodesPage() {
             justify-content: center;
           }
         }
-      `}</style>
+      `}</style>  
     </>
   );
 }

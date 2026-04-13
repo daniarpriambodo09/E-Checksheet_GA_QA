@@ -1,15 +1,24 @@
 // app/api/pre-assy/save-result/route.ts
-
-import { NextRequest, NextResponse } from 'next/server'
-import pool from '@/lib/db'
+import { NextRequest, NextResponse } from 'next/server';
+import pool from '@/lib/db';
 
 export async function POST(request: NextRequest) {
-  const client = await pool.connect()
-
+  const client = await pool.connect();
   try {
-    const body = await request.json()
+    const body = await request.json();
 
-    console.log("🔥 SAVE RESULT BODY:", body)
+    console.log('🔥 PRE-ASSY SAVE BODY:', JSON.stringify({
+      userId:       body.userId,
+      categoryCode: body.categoryCode,
+      itemId:       body.itemId,
+      shift:        body.shift,
+      status:       body.status,
+      timeSlot:     body.timeSlot,
+      areaCode:     body.areaCode,
+      carline:      body.carline,
+      line:         body.line,
+      conveyor:     body.conveyor,   // ✅ FIX: log conveyor juga
+    }));
 
     const {
       userId,
@@ -20,209 +29,271 @@ export async function POST(request: NextRequest) {
       status,
       ngDescription,
       ngDepartment,
+      ngPhotos,
       timeSlot,
-      areaCode
-    } = body
+      areaCode,
+      carline,
+      line,
+      specificArea,
+      // ✅ FIX: terima field conveyor dari frontend (untuk DCI mode)
+      conveyor,
+    } = body;
 
-    /* ======================================================
-       VALIDATION
-    ====================================================== */
-    if (
-      !userId ||
-      !categoryCode ||
-      itemId === undefined ||
-      !dateKey ||
-      !shift ||
-      !status
-    ) {
-      return NextResponse.json(
-        { error: 'Missing required fields' },
-        { status: 400 }
-      )
+    if (!userId || !categoryCode || itemId === undefined || !dateKey || !shift || !status) {
+      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    await client.query('BEGIN')
+    await client.query('BEGIN');
 
-    /* ======================================================
-       VALIDATE USER
-    ====================================================== */
+    // 1. Validate user
     const userRes = await client.query(
-      `SELECT nik FROM users 
-       WHERE id = $1 AND is_active = TRUE`,
+      `SELECT nik FROM users WHERE id = $1 AND is_active = TRUE`,
       [userId]
-    )
-
+    );
     if (userRes.rowCount === 0) {
-      throw new Error('Invalid user')
+      await client.query('ROLLBACK');
+      return NextResponse.json({ error: 'Invalid user' }, { status: 403 });
     }
+    const nik = userRes.rows[0].nik;
 
-    const nik = userRes.rows[0].nik
-
-    /* ======================================================
-       GET CATEGORY
-    ====================================================== */
+    // 2. Get category_id
     const catRes = await client.query(
-      `SELECT id FROM checklist_categories 
-       WHERE category_code = $1`,
+      `SELECT id FROM checklist_categories WHERE category_code = $1`,
       [categoryCode]
-    )
-
+    );
     if (catRes.rowCount === 0) {
-      throw new Error('Category not found')
+      await client.query('ROLLBACK');
+      return NextResponse.json({ error: `Category not found: ${categoryCode}` }, { status: 404 });
     }
+    const categoryId = catRes.rows[0].id;
 
-    const categoryId = catRes.rows[0].id
+    // 3. Normalize item_id
+    const actualItemId = typeof itemId === 'number'
+      ? Math.floor(itemId)
+      : Math.floor(parseFloat(itemId));
 
-    /* ======================================================
-       NORMALIZE ITEM ID
-    ====================================================== */
-    const actualItemId =
-      typeof itemId === 'number'
-        ? Math.floor(itemId)
-        : Math.floor(parseFloat(itemId))
-
-    /* ======================================================
-       RESOLVE AREA
-    ====================================================== */
-    let areaId: number | null = null
-
+    // 4. Resolve area_id
+    let areaId: number | null = null;
     if (areaCode) {
       const areaRes = await client.query(
-        `SELECT id 
-         FROM checklist_areas
-         WHERE area_code = $1
-           AND category_id = $2
-           AND is_active = TRUE`,
+        `SELECT id FROM checklist_areas
+         WHERE area_code = $1 AND category_id = $2 AND is_active = TRUE`,
         [areaCode, categoryId]
-      )
-
-      if (areaRes.rowCount != null && areaRes.rowCount > 0) {
-        areaId = areaRes.rows[0].id
+      );
+      if ((areaRes.rowCount ?? 0) > 0) {
+        areaId = areaRes.rows[0].id;
+        console.log(`✅ Area resolved: ${areaCode} → id=${areaId}`);
+      } else {
+        console.warn(`⚠️ Area not found: ${areaCode} for category_id=${categoryId}`);
       }
     }
 
-    /* ======================================================
-       NORMALIZE TIME SLOT
-       Semua kategori gunakan timeSlot dari request.
-       Jika tidak ada, default ke string kosong ''.
-    ====================================================== */
-    const normalizedTimeSlot = timeSlot ?? ''
+    // 5. Normalize values
+    const normalizedTimeSlot  = (typeof timeSlot === 'string') ? timeSlot.trim() : '';
+    const normalizedCarline   = (typeof carline === 'string' && carline.trim()) ? carline.trim() : null;
+    const normalizedLine      = (typeof line === 'string' && line.trim()) ? line.trim() : null;
+    const specificAreaVal     = (typeof specificArea === 'string' && specificArea.trim())
+      ? specificArea.trim() : null;
+    const ngPhotosVal         = ngPhotos ? JSON.stringify(ngPhotos) : null;
+    const ngDescVal           = ngDescription?.trim() || null;
+    const ngDeptVal           = ngDepartment?.trim()  || null;
 
-    /* ======================================================
-       DELETE MODE
-    ====================================================== */
+    // ✅ FIX: Normalize conveyor
+    // Untuk pre-assy-daily-check-ins, frontend mengirim selectedConveyor
+    // sebagai field `carline` (backward compat) DAN field `conveyor`.
+    // Kita simpan ke KEDUA kolom agar:
+    //   - checklist_results.conveyor → dibaca oleh get-carline-line (mode baru)
+    //   - checklist_results.carline  → dibaca oleh get-carline-line (mode lama/fallback)
+    // Dengan demikian dropdown conveyor selalu terisi setelah checklist disimpan.
+    const normalizedConveyor = (typeof conveyor === 'string' && conveyor.trim())
+      ? conveyor.trim()
+      : (normalizedCarline || null);  // fallback: gunakan carline jika conveyor tidak dikirim
+
+    // 6. Handle DELETE
     if (status === '-') {
+      // ✅ FIX: DELETE juga cek kolom conveyor agar tidak ada orphan row
       await client.query(
         `DELETE FROM checklist_results
-         WHERE user_id = $1
+         WHERE user_id     = $1
            AND category_id = $2
-           AND item_id = $3
-           AND date_key = $4
-           AND shift = $5
-           AND time_slot = $6
-           AND COALESCE(area_id,-1) = COALESCE($7,-1)`,
-        [
-          userId,
-          categoryId,
-          actualItemId,
-          dateKey,
-          shift,
-          normalizedTimeSlot,
-          areaId
-        ]
-      )
-
-      await client.query('COMMIT')
-
-      return NextResponse.json({
-        success: true,
-        deleted: true
-      })
+           AND item_id     = $3
+           AND date_key    = $4
+           AND shift       = $5
+           AND COALESCE(time_slot, '') = $6
+           AND COALESCE(area_id,   -1) = COALESCE($7, -1)
+           AND COALESCE(carline,   '') = COALESCE($8, '')
+           AND COALESCE(line,      '') = COALESCE($9, '')
+           AND COALESCE(specific_area, '') = COALESCE($10, '')`,
+        [userId, categoryId, actualItemId, dateKey, shift,
+         normalizedTimeSlot, areaId, normalizedCarline, normalizedLine, specificAreaVal]
+      );
+      await client.query('COMMIT');
+      return NextResponse.json({ success: true, deleted: true });
     }
 
-    /* ======================================================
-       ✅ UPSERT YANG BENAR
-       
-       PENYEBAB DOUBLE NG:
-       Ketika user pilih "NG", frontend memanggil saveResultToDB DUA KALI:
-         1. Di handleStatusChange → save "NG" dengan ngDescription kosong
-         2. Di saveNgReport (setelah modal) → save "NG" lagi dengan ngDescription terisi
+    // 7. VALIDASI DUPLIKAT GAUGE — ATURAN GLOBAL
+    if (categoryCode === 'pre-assy-daily-check-ins' && normalizedTimeSlot !== '') {
+      const dupRes = await client.query(
+        `SELECT
+           r.id,
+           r.shift,
+           r.carline,
+           r.line,
+           r.conveyor,
+           r.specific_area,
+           ca.area_name,
+           ca.area_code,
+           ci.item_check
+         FROM checklist_results r
+         LEFT JOIN checklist_areas ca ON r.area_id = ca.id
+         LEFT JOIN checklist_items  ci ON r.item_id = ci.id
+         WHERE r.category_id = $1
+           AND r.time_slot   = $2
+           AND r.date_key    = $3
+           AND NOT (
+             COALESCE(r.area_id,           -1) = COALESCE($4, -1)
+             AND COALESCE(r.carline,       '') = COALESCE($5, '')
+             AND COALESCE(r.line,          '') = COALESCE($6, '')
+             AND COALESCE(r.specific_area, '') = COALESCE($7, '')
+           )
+         ORDER BY r.shift, r.submitted_at DESC
+         LIMIT 3`,
+        [categoryId, normalizedTimeSlot, dateKey,
+         areaId, normalizedCarline, normalizedLine, specificAreaVal]
+      );
 
-       Upsert ini HARUS selalu UPDATE jika sudah ada record dengan
-       kombinasi (user_id, category_id, item_id, date_key, shift, time_slot, area_id)
-       yang sama — tidak boleh INSERT baru.
+      if ((dupRes.rowCount ?? 0) > 0) {
+        const duplicates = dupRes.rows.map((row: any) => {
+          const parts: string[] = [];
+          if (row.area_name)  parts.push(row.area_name);
+          if (row.specific_area) parts.push(row.specific_area);
+          // ✅ FIX: tampilkan conveyor jika ada, fallback ke carline
+          const conveyorLabel = row.conveyor || row.carline;
+          if (conveyorLabel)  parts.push(conveyorLabel);
+          return {
+            description:  parts.join(' / '),
+            areaName:     row.area_name     || null,
+            specificArea: row.specific_area || null,
+            carline:      row.carline       || null,
+            conveyor:     row.conveyor      || null,
+            line:         row.line          || null,
+            shift:        row.shift         || null,
+            itemCheck:    row.item_check    || null,
+          };
+        });
+        await client.query('ROLLBACK');
+        console.warn(`⚠️ [Pre-Assy Global Dup] gauge=${normalizedTimeSlot} on ${dateKey} — found at different location`);
+        return NextResponse.json({ error: 'DUPLICATE_ITEM', duplicates }, { status: 409 });
+      }
+    }
 
-       ✅ SOLUSI: Gunakan INSERT ... ON CONFLICT DO UPDATE dengan
-       conflict target yang benar menggunakan expression index.
-    ====================================================== */
-    await client.query(
-      `
-      INSERT INTO checklist_results (
-        user_id,
-        nik,
-        category_id,
-        item_id,
-        date_key,
-        shift,
-        time_slot,
-        status,
-        ng_description,
-        ng_department,
-        area_id,
-        submitted_at,
-        updated_at
-      )
-      VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW(),NOW()
-      )
-      ON CONFLICT (
-        user_id,
-        category_id,
-        item_id,
-        date_key,
-        shift,
-        time_slot,
-        COALESCE(area_id,-1)
-      )
-      DO UPDATE SET
-        status        = EXCLUDED.status,
-        ng_description = EXCLUDED.ng_description,
-        ng_department  = EXCLUDED.ng_department,
-        area_id        = EXCLUDED.area_id,
-        updated_at     = NOW()
-      `,
-      [
-        userId,
-        nik,
-        categoryId,
-        actualItemId,
-        dateKey,
-        shift,
-        normalizedTimeSlot,
-        status,
-        ngDescription?.trim() || null,
-        ngDepartment?.trim() || null,
-        areaId
-      ]
-    )
+    // 8. UPSERT — cek existing row berdasarkan kombinasi lokasi
+    const existingRow = await client.query(
+      `SELECT id FROM checklist_results
+       WHERE user_id     = $1
+         AND category_id = $2
+         AND item_id     = $3
+         AND date_key    = $4
+         AND shift       = $5
+         AND COALESCE(area_id,       -1) = COALESCE($6, -1)
+         AND COALESCE(carline,       '') = COALESCE($7, '')
+         AND COALESCE(line,          '') = COALESCE($8, '')
+         AND COALESCE(specific_area, '') = COALESCE($9, '')
+       LIMIT 1`,
+      [userId, categoryId, actualItemId, dateKey, shift,
+       areaId, normalizedCarline, normalizedLine, specificAreaVal]
+    );
 
-    await client.query('COMMIT')
+    if ((existingRow.rowCount ?? 0) > 0) {
+      // UPDATE — termasuk update conveyor ke nilai terbaru
+      await client.query(
+        `UPDATE checklist_results SET
+          status         = $1,
+          ng_description = $2,
+          ng_department  = $3,
+          ng_photos      = $4,
+          time_slot      = $5,
+          conveyor       = $6,
+          updated_at     = NOW()
+         WHERE id = $7`,
+        [status, ngDescVal, ngDeptVal, ngPhotosVal, normalizedTimeSlot,
+         normalizedConveyor, existingRow.rows[0].id]
+      );
+      console.log(
+        `✅ [Pre-Assy] UPDATE id=${existingRow.rows[0].id} ` +
+        `item=${actualItemId} shift=${shift} conveyor="${normalizedConveyor}"`
+      );
+    } else {
+      // ✅ FIX: INSERT menyertakan kolom `conveyor` agar terbaca oleh get-carline-line
+      // Tabel checklist_results memiliki kolom `conveyor` (text, nullable).
+      // Unique index v1: (user_id, category_id, item_id, date_key, shift,
+      //                   COALESCE(time_slot,''), COALESCE(area_id,-1),
+      //                   COALESCE(carline,''),   COALESCE(line,''),
+      //                   COALESCE(specific_area,''))
+      // Unique index v2: (user_id, category_id, item_id, date_key, shift,
+      //                   COALESCE(time_slot,''), COALESCE(area_id,-1),
+      //                   COALESCE(conveyor,''),  COALESCE(specific_area,''))
+      // ON CONFLICT menggunakan index v1 (legacy, lebih lengkap).
+      await client.query(
+        `INSERT INTO checklist_results (
+          user_id, nik, category_id, item_id, date_key, shift,
+          time_slot, status, ng_description, ng_department, ng_photos,
+          area_id, carline, line, conveyor, specific_area,
+          submitted_at, created_at, updated_at
+        ) VALUES (
+          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
+          NOW(),NOW(),NOW()
+        )
+        ON CONFLICT (
+          user_id,
+          category_id,
+          item_id,
+          date_key,
+          shift,
+          COALESCE(time_slot,     ''::character varying),
+          COALESCE(area_id,       '-1'::integer),
+          COALESCE(carline,       ''::character varying),
+          COALESCE(line,          ''::character varying),
+          COALESCE(specific_area, ''::character varying)
+        )
+        DO UPDATE SET
+          status         = EXCLUDED.status,
+          ng_description = EXCLUDED.ng_description,
+          ng_department  = EXCLUDED.ng_department,
+          ng_photos      = EXCLUDED.ng_photos,
+          time_slot      = EXCLUDED.time_slot,
+          area_id        = EXCLUDED.area_id,
+          carline        = EXCLUDED.carline,
+          line           = EXCLUDED.line,
+          conveyor       = EXCLUDED.conveyor,
+          specific_area  = EXCLUDED.specific_area,
+          updated_at     = NOW()`,
+        [
+          userId, nik, categoryId, actualItemId, dateKey, shift,
+          normalizedTimeSlot, status, ngDescVal, ngDeptVal, ngPhotosVal,
+          areaId, normalizedCarline, normalizedLine, normalizedConveyor, specificAreaVal,
+        ]
+      );
+      console.log(
+        `✅ [Pre-Assy] INSERT item=${actualItemId} (${categoryCode}) ` +
+        `area_id=${areaId} conveyor="${normalizedConveyor}"`
+      );
+    }
 
-    return NextResponse.json({
-      success: true,
-      areaId
-    })
+    await client.query('COMMIT');
+    return NextResponse.json({ success: true, areaId, conveyor: normalizedConveyor });
 
   } catch (err: any) {
-    await client.query('ROLLBACK')
-
-    console.error('❌ PRE-ASSY SAVE ERROR:', err.message)
-
+    await client.query('ROLLBACK');
+    console.error('❌ PRE-ASSY SAVE ERROR:', err.message, '| code:', err.code);
+    if (err.code === '23505') {
+      return NextResponse.json({ error: 'Duplicate record', detail: err.detail }, { status: 409 });
+    }
     return NextResponse.json(
       { error: 'Failed to save result', detail: err.message },
       { status: 500 }
-    )
+    );
   } finally {
-    client.release()
+    client.release();
   }
 }

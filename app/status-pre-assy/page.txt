@@ -245,14 +245,16 @@ function AreaFilter({
 
 export default function PreAssyGLStatusPage() {
   const router = useRouter()
-  const { user } = useAuth()
+  const { user, loading: authLoading, isInitialized } = useAuth()
   
-  // 🔹 Validasi role
+  // 🔹 Validasi role — tunggu auth selesai initialize dulu
   useEffect(() => {
-    if (!user || (user.role !== "group-leader-qa" && user.role !== "inspector-qa")) {
-      router.push("/login-page")
+    if (!isInitialized || authLoading) return;
+    if (!user) { router.push("/login-page"); return; }
+    if (user.role !== "group-leader-qa" && user.role !== "inspector-qa") {
+      router.push("/home");
     }
-  }, [user, router])
+  }, [user, authLoading, isInitialized, router])
   
   // 🔹 Dapatkan view modes yang diizinkan berdasarkan role
   const allowedViewModes = useMemo(() => {
@@ -1641,7 +1643,7 @@ const CS_REMOVE_TOOL_ITEMS: CSRemoveToolItem[] = useMemo(() => [
     setSelectedWeek(1)
   }, [activeMonth, activeYear])
   
-  if (!user) return null
+  if (authLoading || !isInitialized || !user) return null
   
   return (
     <>

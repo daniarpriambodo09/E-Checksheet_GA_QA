@@ -6,6 +6,8 @@ import {
   useState,
   useCallback,
   useEffect,
+  useMemo,
+  useRef,
   ReactNode,
 } from "react";
 import { useRouter } from "next/navigation";
@@ -44,243 +46,182 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 // 🔑 Kunci localStorage
-const CURRENT_USER_KEY = "auth_current_user_v2";
+const CURRENT_USER_KEY  = "auth_current_user_v2";
 const SESSION_TOKEN_KEY = "auth_session_token";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [isInitialized, setIsInitialized] = useState(false); // ✅ STATE TERPISAH
 
-  // 🔄 Load dari localStorage saat pertama kali mount
+  // Simpan router di ref — mencegah logout callback identity berubah saat router re-render
+  const routerRef = useRef(router);
+  useEffect(() => { routerRef.current = router; });
+
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [loading, setLoading]         = useState(true);
+  const [isInitialized, setIsInitialized] = useState(false);
+
+  // 🔄 Load dari localStorage saat pertama kali mount (sekali saja)
   useEffect(() => {
     try {
       const savedCurrentUser = localStorage.getItem(CURRENT_USER_KEY);
-      const sessionToken = localStorage.getItem(SESSION_TOKEN_KEY);
-
-      console.log('🔍 Loading auth from localStorage:', {
-        hasUser: !!savedCurrentUser,
-        hasToken: !!sessionToken
-      });
+      const sessionToken     = localStorage.getItem(SESSION_TOKEN_KEY);
 
       if (savedCurrentUser && sessionToken) {
         const user = JSON.parse(savedCurrentUser);
-        if (user.role && ["group-leader-qa", "inspector-qa", "inspector-ga", "eso", "admin"].includes(user.role)) {
+        const validRoles = ["group-leader-qa", "inspector-qa", "inspector-ga", "eso", "admin"];
+        if (user.role && validRoles.includes(user.role)) {
           setCurrentUser({
-            id: user.id || user.username,
-            username: user.username,
-            fullName: user.fullName,
-            nik: user.nik,
+            id:         user.id || user.username,
+            username:   user.username,
+            fullName:   user.fullName,
+            nik:        user.nik,
             department: user.department,
-            role: user.role as Role,
+            role:       user.role as Role,
           });
-          console.log('✅ User loaded:', user.username);
-        } else {
-          console.warn('⚠️ Invalid role:', user.role);
         }
-      } else {
-        console.log('ℹ️ No saved session found');
       }
     } catch (e) {
       console.warn("⚠️ Gagal memuat data auth dari localStorage", e);
     } finally {
       setLoading(false);
-      setIsInitialized(true); // ✅ SET TRUE SETELAH LOAD SELESAI
+      setIsInitialized(true);
     }
-  }, []);
+  }, []); // ← [] = hanya saat mount, tidak pernah re-run
 
-  // ✅ FIX: HANYA simpan ke localStorage saat currentUser BERUBAH (JANGAN HAPUS!)
+  // Simpan ke localStorage saat currentUser berubah
   useEffect(() => {
     if (currentUser) {
       localStorage.setItem(
         CURRENT_USER_KEY,
         JSON.stringify({
-          id: currentUser.id,
-          username: currentUser.username,
-          fullName: currentUser.fullName,
-          nik: currentUser.nik,
+          id:         currentUser.id,
+          username:   currentUser.username,
+          fullName:   currentUser.fullName,
+          nik:        currentUser.nik,
           department: currentUser.department,
-          role: currentUser.role,
+          role:       currentUser.role,
         })
       );
-      console.log('💾 Session saved for:', currentUser.username);
     }
-    // ❌ JANGAN HAPUS localStorage saat currentUser null!
-    // Hapus hanya saat logout eksplisit
+    // Tidak hapus saat null — hapus hanya via logout eksplisit
   }, [currentUser]);
 
   // ✅ SIGNUP
   const signup = useCallback(async ({
-    username,
-    fullName,
-    nik,
-    department,
-    role,
-    password,
-    confirmPassword,
+    username, fullName, nik, department, role, password, confirmPassword,
   }: {
-    username: string;
-    fullName: string;
-    nik: string;
-    department: string;
-    role: Role;
-    password: string;
-    confirmPassword: string;
+    username: string; fullName: string; nik: string; department: string;
+    role: Role; password: string; confirmPassword: string;
   }) => {
-    if (!username.trim() || !fullName.trim() || !nik.trim() || !department.trim()) {
+    if (!username.trim() || !fullName.trim() || !nik.trim() || !department.trim())
       return { success: false, error: "Semua field wajib diisi!" };
-    }
 
-    if (!role || !["group-leader-qa", "inspector-qa", "inspector-ga", "admin", "eso"].includes(role)) {
+    if (!role || !["group-leader-qa", "inspector-qa", "inspector-ga", "admin", "eso"].includes(role))
       return { success: false, error: "Pilih role yang valid!" };
-    }
 
-    if (password.length < 6) {
+    if (password.length < 6)
       return { success: false, error: "Password minimal 6 karakter!" };
-    }
 
-    if (password !== confirmPassword) {
+    if (password !== confirmPassword)
       return { success: false, error: "Password dan konfirmasi tidak cocok!" };
-    }
 
     const validDepartments: Record<Role, string[]> = {
       "group-leader-qa": ["quality-assurance"],
-      "inspector-qa": ["quality-assurance"],
-      "inspector-ga": ["general-affairs"],
-      'admin': ["admin"],
-      'eso': ['k3']
+      "inspector-qa":    ["quality-assurance"],
+      "inspector-ga":    ["general-affairs"],
+      "admin":           ["admin"],
+      "eso":             ["k3"],
     };
 
     if (!validDepartments[role].includes(department)) {
-      const deptLabels = validDepartments[role]
-        .map((d) => {
-          const map: Record<string, string> = {
-            "quality-assurance": "Quality Assurance",
-            "general-affairs": "General Affairs",
-            "admin": "Admin",
-            "k3": "K3/ESO"
-          };
-          return map[d] || d;
-        })
-        .join(", ");
+      const deptLabels = validDepartments[role].map(d => ({
+        "quality-assurance": "Quality Assurance",
+        "general-affairs":   "General Affairs",
+        "admin":             "Admin",
+        "k3":                "K3/ESO",
+      }[d] || d)).join(", ");
       return { success: false, error: `Role ${role} hanya boleh memilih departemen: ${deptLabels}` };
     }
 
     try {
-      console.log('📤 Sending signup request to API...');
-      
-      const response = await fetch('/api/auth/signup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username: username.trim(),
-          fullName: fullName.trim(),
-          nik: nik.trim(),
-          department,
-          role,
-          password,
-          confirmPassword,
-        }),
+      const response = await fetch("/api/auth/signup", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ username: username.trim(), fullName: fullName.trim(), nik: nik.trim(), department, role, password, confirmPassword }),
       });
-
       const result = await response.json();
-
       if (!response.ok) {
-        console.error('❌ Signup failed:', result.error);
-        
-        if (response.status === 409) {
-          return { success: false, error: "Username atau NIK sudah terdaftar!" };
-        }
+        if (response.status === 409) return { success: false, error: "Username atau NIK sudah terdaftar!" };
         return { success: false, error: result.error || "Pendaftaran gagal!" };
       }
-
-      console.log('✅ Signup successful:', result.userId);
       return { success: true };
-      
     } catch (error) {
-      console.error("❌ Error during signup API call:", error);
+      console.error("❌ Error during signup:", error);
       return { success: false, error: "Gagal terhubung ke server. Periksa koneksi Anda." };
     }
-  }, []);
+  }, []); // ← [] karena tidak ada dependency dari luar
 
   // ✅ LOGIN
   const login = useCallback(async (username: string, password: string) => {
-    if (!username.trim() || !password) {
+    if (!username.trim() || !password)
       return { success: false, error: "Username dan password harus diisi!" };
-    }
 
     try {
-      console.log('📤 Sending login request to API...');
-      
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username: username.trim(),
-          password,
-        }),
+      const response = await fetch("/api/auth/login", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ username: username.trim(), password }),
       });
-
       const result = await response.json();
-
       if (!response.ok) {
-        console.error('❌ Login failed:', result.error);
-        
-        if (response.status === 401) {
-          return { success: false, error: result.error || "Username atau password salah!" };
-        }
-        if (response.status === 403) {
-          return { success: false, error: result.error || "Akun tidak aktif!" };
-        }
+        if (response.status === 401) return { success: false, error: result.error || "Username atau password salah!" };
+        if (response.status === 403) return { success: false, error: result.error || "Akun tidak aktif!" };
         return { success: false, error: result.error || "Login gagal!" };
       }
 
       const safeUser: User = {
-        id: result.user.id,
-        username: result.user.username,
-        fullName: result.user.fullName,
-        nik: result.user.nik,
+        id:         result.user.id,
+        username:   result.user.username,
+        fullName:   result.user.fullName,
+        nik:        result.user.nik,
         department: result.user.department,
-        role: result.user.role as Role,
+        role:       result.user.role as Role,
       };
-
       setCurrentUser(safeUser);
 
-      // Set session token
       const sessionToken = `sess_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       localStorage.setItem(SESSION_TOKEN_KEY, sessionToken);
 
-      console.log('✅ Login successful:', safeUser.fullName, 'Role:', safeUser.role);
       return { success: true };
-      
     } catch (error) {
-      console.error("❌ Error during login API call:", error);
+      console.error("❌ Error during login:", error);
       return { success: false, error: "Gagal terhubung ke server. Periksa koneksi Anda." };
     }
-  }, []);
+  }, []); // ← [] karena tidak ada dependency dari luar
 
-  // ✅ LOGOUT - HAPUS localStorage DI SINI (bukan di useEffect)
+  // ✅ LOGOUT — pakai routerRef sehingga tidak perlu router di dep
   const logout = useCallback(() => {
     setCurrentUser(null);
-    localStorage.removeItem(CURRENT_USER_KEY);  // ✅ HAPUS SAAT LOGOUT
-    localStorage.removeItem(SESSION_TOKEN_KEY); // ✅ HAPUS SAAT LOGOUT
-    console.log('👋 Logout successful');
-    router.push("/login-page");
-  }, [router]);
+    localStorage.removeItem(CURRENT_USER_KEY);
+    localStorage.removeItem(SESSION_TOKEN_KEY);
+    routerRef.current.push("/login-page");
+  }, []); // ← [] karena router dibaca dari ref, bukan closure
+
+  // ✅ KUNCI UTAMA — stabilkan context value dengan useMemo
+  // Tanpa ini: setiap render AuthProvider → object value baru → semua consumer re-render
+  // Dengan ini: object value hanya dibuat ulang jika currentUser/loading/isInitialized berubah
+  const contextValue = useMemo<AuthContextType>(() => ({
+    user:          currentUser,
+    currentUser,
+    loading,
+    isInitialized,
+    signup,
+    login,
+    logout,
+  }), [currentUser, loading, isInitialized, signup, login, logout]);
 
   return (
-    <AuthContext.Provider
-      value={{
-        user: currentUser,
-        currentUser,
-        loading,
-        isInitialized, // ✅ GUNAKAN STATE ASLI
-        signup,
-        login,
-        logout,
-      }}
-    >
+    <AuthContext.Provider value={contextValue}>
       {children}
     </AuthContext.Provider>
   );
@@ -294,28 +235,15 @@ export function useAuth() {
   return context;
 }
 
-// Server-side helpers (tetap sama)
+// Server-side helpers (tidak berubah)
 export async function getAuth(request?: Request): Promise<{ user: User | null; error?: string }> {
   try {
     if (typeof window !== "undefined") {
       const currentUserStr = localStorage.getItem(CURRENT_USER_KEY);
-      const sessionToken = localStorage.getItem(SESSION_TOKEN_KEY);
-
-      if (!currentUserStr || !sessionToken) {
-        return { user: null };
-      }
-
-      const currentUser = JSON.parse(currentUserStr);
-      return {
-        user: {
-          id: currentUser.id || currentUser.username,
-          username: currentUser.username,
-          fullName: currentUser.fullName,
-          nik: currentUser.nik,
-          department: currentUser.department,
-          role: currentUser.role as Role,
-        },
-      };
+      const sessionToken   = localStorage.getItem(SESSION_TOKEN_KEY);
+      if (!currentUserStr || !sessionToken) return { user: null };
+      const u = JSON.parse(currentUserStr);
+      return { user: { id: u.id || u.username, username: u.username, fullName: u.fullName, nik: u.nik, department: u.department, role: u.role as Role } };
     }
     return { user: null };
   } catch (error) {
@@ -326,29 +254,15 @@ export async function getAuth(request?: Request): Promise<{ user: User | null; e
 
 export function isAuthenticated(): boolean {
   if (typeof window === "undefined") return false;
-  const currentUser = localStorage.getItem(CURRENT_USER_KEY);
-  const sessionToken = localStorage.getItem(SESSION_TOKEN_KEY);
-  return !!currentUser && !!sessionToken;
+  return !!localStorage.getItem(CURRENT_USER_KEY) && !!localStorage.getItem(SESSION_TOKEN_KEY);
 }
 
 export function getCurrentUser(): User | null {
   if (typeof window === "undefined") return null;
-
-  const currentUserStr = localStorage.getItem(CURRENT_USER_KEY);
-  if (!currentUserStr) return null;
-
+  const str = localStorage.getItem(CURRENT_USER_KEY);
+  if (!str) return null;
   try {
-    const currentUser = JSON.parse(currentUserStr);
-    return {
-      id: currentUser.id || currentUser.username,
-      username: currentUser.username,
-      fullName: currentUser.fullName,
-      nik: currentUser.nik,
-      department: currentUser.department,
-      role: currentUser.role as Role,
-    };
-  } catch (error) {
-    console.error("Error parsing current user:", error);
-    return null;
-  }
+    const u = JSON.parse(str);
+    return { id: u.id || u.username, username: u.username, fullName: u.fullName, nik: u.nik, department: u.department, role: u.role as Role };
+  } catch { return null; }
 }

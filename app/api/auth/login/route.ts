@@ -90,12 +90,12 @@ export async function POST(request: NextRequest) {
     // ✅ Set HTTP-only cookie untuk session token (tidak bisa diakses JavaScript)
     response.cookies.set('auth_session_token', sessionToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production', // Hanya HTTPS di production
-      sameSite: 'strict',
-      maxAge: 24 * 60 * 60, // 24 jam dalam detik
+      secure: false,          // ⬅️ WAJIB diubah
+      sameSite: 'lax',        // ⬅️ WAJIB diubah
+      maxAge: 24 * 60 * 60,
       path: '/',
     });
-
+    
     // ✅ Tambahkan security headers
     response.headers.set('X-Content-Type-Options', 'nosniff');
     response.headers.set('X-Frame-Options', 'DENY');

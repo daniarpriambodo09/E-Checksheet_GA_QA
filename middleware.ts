@@ -1,4 +1,4 @@
-// middleware.ts (di root folder, BUKAN di app/)
+// middleware.ts
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
