@@ -45,8 +45,6 @@ Triggers:
     update_carline_line_mapping_updated_at BEFORE UPDATE ON carline_line_mapping FOR EACH ROW EXECUTE FUNCTION update_carline_line_mapping_updated_at()
 
 
-e_checksheet_qa=# \d checklist_areass
-Did not find any relation named "checklist_areass".
 e_checksheet_qa=# \d checklist_areas
                                          Table "public.checklist_areas"
    Column    |            Type             | Collation | Nullable |                   Default
@@ -229,6 +227,8 @@ Foreign-key constraints:
     "checklist_signatures_user_id_fkey" FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 
 
+e_checksheet_qa=# \d gauge_checkpoint_resutls;
+Did not find any relation named "gauge_checkpoint_resutls".
 e_checksheet_qa=# \d gauge_checkpoint_results
                         Table "public.gauge_checkpoint_results"
     Column     |            Type             | Collation | Nullable |      Default
@@ -255,6 +255,8 @@ Foreign-key constraints:
     "gauge_checkpoint_results_gauge_id_fkey" FOREIGN KEY (gauge_id) REFERENCES gauges(id)
 
 
+e_checksheet_qa=# \d gauge_checkpoint_checkpoints
+Did not find any relation named "gauge_checkpoint_checkpoints".
 e_checksheet_qa=# \d gauge_checkpoints
                              Table "public.gauge_checkpoints"
       Column      |            Type             | Collation | Nullable |      Default
@@ -275,8 +277,6 @@ Referenced by:
     TABLE "gauge_checkpoint_results" CONSTRAINT "gauge_checkpoint_results_checkpoint_id_fkey" FOREIGN KEY (checkpoint_id) REFERENCES gauge_checkpoints(id)
 
 
-e_checksheet_qa=# \d gauge_inspection
-Did not find any relation named "gauge_inspection".
 e_checksheet_qa=# \d gauge_inspections
                             Table "public.gauge_inspections"
      Column     |            Type             | Collation | Nullable |      Default
@@ -351,21 +351,41 @@ Check constraints:
     "gauge_types_area_type_check" CHECK (area_type::text = ANY (ARRAY['pre-assy'::character varying, 'final-assy'::character varying]::text[]))
 
 
-e_checksheet_qa=# select * from checklist_categories
-e_checksheet_qa-# ;
- id |                category_name                |      category_code       |  table_type  | area_type  | is_active | sort_order |         created_at         | description
-----+---------------------------------------------+--------------------------+--------------+------------+-----------+------------+----------------------------+-------------
-  1 | Daily Check Group Leader Final Assy         | final-assy-gl            | group-leader | final-assy | t         |          1 | 2026-02-10 11:55:32.471988 |
-  2 | Daily Check Inspector Final Assy            | final-assy-inspector     | inspector    | final-assy | t         |          2 | 2026-02-10 11:55:32.471988 |
-  3 | Daily Check Group Leader Pre Assy           | pre-assy-daily-gl        | group-leader | pre-assy   | t         |          3 | 2026-02-11 07:48:51.400478 |
-  4 | Call Check CC & Stripping GL Pre Assy       | pre-assy-cc-stripping-gl | group-leader | pre-assy   | t         |          4 | 2026-02-11 07:48:51.400478 |
-  5 | Daily Check Ins. Inspector Pre Assy         | pre-assy-daily-check-ins | inspector    | pre-assy   | t         |          5 | 2026-02-11 07:48:51.400478 |
-  6 | Check Sheet Control Remove Tool             | pre-assy-cs-remove-tool  | inspector    | pre-assy   | t         |          6 | 2026-02-11 07:48:51.400478 |
-  7 | Daily Check Pressure Jig Inspector Pre Assy | pre-assy-pressure-jig    | inspector    | pre-assy   | t         |          7 | 2026-02-11 07:48:51.400478 |
-(7 rows)
+e_checksheet_qa=# \d user
+Did not find any relation named "user".
+e_checksheet_qa=# \d users
+                                  Table "public.users"
+    Column     |            Type             | Collation | Nullable |      Default
+---------------+-----------------------------+-----------+----------+-------------------
+ id            | character varying(100)      |           | not null |
+ username      | character varying(50)       |           | not null |
+ full_name     | character varying(100)      |           | not null |
+ nik           | character varying(50)       |           | not null |
+ department    | character varying(50)       |           | not null |
+ role          | character varying(50)       |           | not null |
+ password_hash | character varying(255)      |           | not null |
+ is_active     | boolean                     |           |          | true
+ created_at    | timestamp without time zone |           |          | CURRENT_TIMESTAMP
+ updated_at    | timestamp without time zone |           |          | CURRENT_TIMESTAMP
+ last_login    | timestamp without time zone |           |          |
+Indexes:
+    "users_pkey" PRIMARY KEY, btree (id)
+    "idx_users_department" btree (department)
+    "idx_users_nik" btree (nik)
+    "idx_users_role" btree (role)
+    "idx_users_username" btree (username)
+    "users_nik_key" UNIQUE CONSTRAINT, btree (nik)
+    "users_username_key" UNIQUE CONSTRAINT, btree (username)
+Check constraints:
+    "check_department" CHECK (department::text = ANY (ARRAY['quality-assurance'::character varying, 'admin'::character varying, 'k3'::character varying]::text[]))
+    "check_role" CHECK (role::text = ANY (ARRAY['group-leader-qa'::character varying, 'inspector-qa'::character varying, 'admin'::character varying, 'eso'::character varying]::text[]))
+Referenced by:
+    TABLE "carline_line_mapping" CONSTRAINT "carline_line_mapping_user_id_fkey" FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    TABLE "checklist_results" CONSTRAINT "checklist_results_user_id_fkey" FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    TABLE "checklist_signatures" CONSTRAINT "checklist_signatures_user_id_fkey" FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    TABLE "gauge_inspections" CONSTRAINT "gauge_inspections_user_id_fkey" FOREIGN KEY (user_id) REFERENCES users(id)
 
 
-e_checksheet_qa=#
 e_checksheet_qa=# select * from checklist_items
 e_checksheet_qa-# ;
   id  | category_id | item_no |                                                                   check_point                                                                   |                              standard                              |      waktu_check      | shift |   machine   |   kind   | size |              item_check               |        method         | area_tensile | area_cross_section | area_cutting | area_pa |  schedule   |    tool_type     | control_no |         item_check_desc          | frequency | judge |           metode_check           |       area        | show_in_wp_check | show_in_checker | show_in_visual_1 | show_in_visual_2 | show_in_double_check | is_active | sort_order |         created_at         |         updated_at         | area_id
@@ -736,29 +756,21 @@ e_checksheet_qa-# ;
  1242 |           6 | 16      | CLIPPER - Ada dan sesuai control numbernya                                                                                                      |                                                                    |                       | A     |             |          |      |                                       |                       | f            | f                  | f            | f       |             | CLIPPER          |            | Ada dan sesuai control numbernya |           |       |                                  |                   | f                | f               | f                | f                | f                    | t         |        141 | 2026-03-10 15:41:03.911926 | 2026-03-10 15:41:03.911926 |
  1243 |           6 | 16      | CLIPPER - Ada dan sesuai control numbernya                                                                                                      |                                                                    |                       | B     |             |          |      |                                       |                       | f            | f                  | f            | f       |             | CLIPPER          |            | Ada dan sesuai control numbernya |           |       |                                  |                   | f                | f               | f                | f                | f                    | t         |        142 | 2026-03-10 15:41:03.911926 | 2026-03-10 15:41:03.911926 |
 (365 rows)
+e_checksheet_qa=#
+e_checksheet_qa=# select * from checklist_categories;
+ id |                category_name                |      category_code       |  table_type  | area_type  | is_active | sort_order |         created_at         | description
+----+---------------------------------------------+--------------------------+--------------+------------+-----------+------------+----------------------------+-------------
+  1 | Daily Check Group Leader Final Assy         | final-assy-gl            | group-leader | final-assy | t         |          1 | 2026-02-10 11:55:32.471988 |
+  2 | Daily Check Inspector Final Assy            | final-assy-inspector     | inspector    | final-assy | t         |          2 | 2026-02-10 11:55:32.471988 |
+  3 | Daily Check Group Leader Pre Assy           | pre-assy-daily-gl        | group-leader | pre-assy   | t         |          3 | 2026-02-11 07:48:51.400478 |
+  4 | Call Check CC & Stripping GL Pre Assy       | pre-assy-cc-stripping-gl | group-leader | pre-assy   | t         |          4 | 2026-02-11 07:48:51.400478 |
+  5 | Daily Check Ins. Inspector Pre Assy         | pre-assy-daily-check-ins | inspector    | pre-assy   | t         |          5 | 2026-02-11 07:48:51.400478 |
+  6 | Check Sheet Control Remove Tool             | pre-assy-cs-remove-tool  | inspector    | pre-assy   | t         |          6 | 2026-02-11 07:48:51.400478 |
+  7 | Daily Check Pressure Jig Inspector Pre Assy | pre-assy-pressure-jig    | inspector    | pre-assy   | t         |          7 | 2026-02-11 07:48:51.400478 |
+(7 rows)
 
 
-e_checksheet_qa=#
-e_checksheet_qa=#
-e_checksheet_qa=#
-e_checksheet_qa=#
-e_checksheet_qa=#
-e_checksheet_qa=#
-e_checksheet_qa=#
-e_checksheet_qa=#
-e_checksheet_qa=#
-e_checksheet_qa=#
-e_checksheet_qa=#
-e_checksheet_qa=#
-e_checksheet_qa=#
-e_checksheet_qa=#
-e_checksheet_qa=#
-e_checksheet_qa=#
-e_checksheet_qa=#
-e_checksheet_qa=#
-e_checksheet_qa=#
-e_checksheet_qa=# select * from gauge_qr_codes
-e_checksheet_qa-# ;
+e_checksheet_qa=# select * from gauge_qr_codes;
  id | gauge_type_id |  gauge_type_slug  |       gauge_type_name        | area_type  |     gauge_id      |        qr_value         |            display_name            | seq_number | notes | is_active |   created_by   |          created_at           |          updated_at
 ----+---------------+-------------------+------------------------------+------------+-------------------+-------------------------+------------------------------------+------------+-------+-----------+----------------+-------------------------------+-------------------------------
   1 |             2 | micrometer        | MICROMETER                   | pre-assy   | GAUGE-PA-MCR-001  | DCI-2-GAUGE-PA-MCR-001  | Micrometer PA #1                   |          1 |       | t         |                | 2026-03-11 09:24:15.810758+07 | 2026-03-11 09:24:15.810758+07
@@ -794,45 +806,6 @@ e_checksheet_qa-# ;
  43 |            10 | dial-gauge        | DIAL GAUGE                   | pre-assy   | GAUGE-PA-DIA-001  | DCI-10-GAUGE-PA-DIA-001 | DIAL GAUGE PA #1                   |          1 |       | t         | user_admin_001 | 2026-04-07 19:16:15.028847+07 | 2026-04-07 19:16:15.028847+07
  44 |             9 | tape-navigasi     | TAPE NAVIGASI                | final-assy | GAUGE-FA-TAPE-002 | DCI-9-GAUGE-FA-TAPE-002 | TAPE NAVIGASI FA #2                |          2 |       | t         | user_admin_001 | 2026-04-09 07:45:32.81979+07  | 2026-04-09 07:45:32.81979+07
 (32 rows)
-
-
-e_checksheet_qa=#
-e_checksheet_qa=#
-e_checksheet_qa=#
-e_checksheet_qa=#
-e_checksheet_qa=#
-e_checksheet_qa=#
-e_checksheet_qa=#
-e_checksheet_qa=#
-e_checksheet_qa=#
-e_checksheet_qa=#
-e_checksheet_qa=#
-e_checksheet_qa=#
-e_checksheet_qa=# select * from gauge_types;
- id |  gauge_type_slug  |       gauge_type_name        | area_type  | dci_item_id | abbrev | is_active | created_by |          created_at           |          updated_at
-----+-------------------+------------------------------+------------+-------------+--------+-----------+------------+-------------------------------+-------------------------------
-  1 | roll-meter        | ROLL METER / MISTAR BAJA     | final-assy |           2 | ROLL   | t         |            | 2026-03-13 07:38:39.156977+07 | 2026-04-07 19:31:55.623262+07
-  2 | go-no-go          | GO NO GO                     | final-assy |           3 | GO-N   | t         |            | 2026-03-13 07:38:39.156977+07 | 2026-04-07 19:31:55.623262+07
-  3 | steel-ruler       | STEEL RULER                  | pre-assy   |           5 | STEE   | t         |            | 2026-03-11 09:24:15.810758+07 | 2026-04-07 19:31:55.623262+07
-  4 | caliper           | CALIPER                      | pre-assy   |           3 | CALI   | t         |            | 2026-03-11 09:24:15.810758+07 | 2026-04-07 19:31:55.623262+07
-  5 | bent-gauge        | BENT UP/DOWN GAUGE           | pre-assy   |           6 | BENT   | t         |            | 2026-03-11 09:24:15.810758+07 | 2026-04-07 19:31:55.623262+07
-  6 | crimping-standard | CRIMPING STANDARD & IS       | pre-assy   |           9 | CRIM   | t         |            | 2026-03-11 09:24:15.810758+07 | 2026-04-07 19:31:55.623262+07
-  7 | dummy-sample      | DUMMY SAMPLE OK & N-OK       | final-assy |           5 | DUMM   | t         |            | 2026-03-13 07:38:39.156977+07 | 2026-04-07 19:31:55.623262+07
-  8 | inspection-board  | INSPECTION BOARD             | final-assy |          10 | INSP   | t         |            | 2026-03-13 07:38:39.156977+07 | 2026-04-07 19:31:55.623262+07
-  9 | pipo              | PIPO                         | final-assy |           1 | PIPO   | t         |            | 2026-03-13 07:38:39.156977+07 | 2026-04-07 19:31:55.623262+07
- 10 | fuse-plate        | FUSE PLATE                   | final-assy |           7 | FUSE   | t         |            | 2026-03-13 07:38:39.156977+07 | 2026-04-07 19:31:55.623262+07
- 11 | pocket-comparator | POCKET COMPARATOR            | pre-assy   |           8 | POCK   | t         |            | 2026-03-11 09:24:15.810758+07 | 2026-04-07 19:31:55.623262+07
- 12 | tape-navigasi     | TAPE NAVIGASI                | final-assy |           9 | TAPE   | t         |            | 2026-03-13 07:38:39.156977+07 | 2026-04-07 19:31:55.623262+07
- 13 | micrometer        | MICROMETER                   | pre-assy   |           2 | MICR   | t         |            | 2026-03-11 09:24:15.810758+07 | 2026-04-07 19:31:55.623262+07
- 14 | tensile           | MESIN TENSILE                | pre-assy   |           4 | TENS   | t         |            | 2026-03-11 09:24:15.810758+07 | 2026-04-07 19:31:55.623262+07
- 15 | lampu-navigasi    | LAMPU NAVIGASI               | final-assy |           8 | LAMP   | t         |            | 2026-03-13 07:38:39.156977+07 | 2026-04-07 19:31:55.623262+07
- 16 | dry-surf          | DRY SURF                     | final-assy |          11 | DRY-   | t         |            | 2026-03-13 07:38:39.156977+07 | 2026-04-07 19:31:55.623262+07
- 17 | packing           | PACKING                      | final-assy |          12 | PACK   | t         |            | 2026-03-13 07:38:39.156977+07 | 2026-04-07 19:31:55.623262+07
- 18 | thickness-gauge   | THICKNESS GAUGE / GO NO GO   | pre-assy   |           7 | THIC   | t         |            | 2026-03-11 09:24:15.810758+07 | 2026-04-07 19:31:55.623262+07
- 19 | push-gauge-rb     | PUSH GAUGE RB                | final-assy |           4 | PUSH   | t         |            | 2026-03-13 07:38:39.156977+07 | 2026-04-07 19:31:55.623262+07
- 20 | inspection-point  | IMPORTANT / INSPECTION POINT | final-assy |           6 | INSP   | t         |            | 2026-03-13 07:38:39.156977+07 | 2026-04-07 19:31:55.623262+07
- 21 | dial-gauge        | DIAL GAUGE                   | pre-assy   |          10 | DIAL   | t         |            | 2026-04-07 19:16:04.559529+07 | 2026-04-07 19:31:55.623262+07
-(21 rows)
 
 
 e_checksheet_qa=#
