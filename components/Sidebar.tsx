@@ -21,7 +21,12 @@ interface SidebarProps {
 // ✅ React.memo — Sidebar tidak re-render saat parent re-render
 // (kecuali props userName/userRole benar-benar berubah)
 export const Sidebar = memo(function Sidebar({ userName = "User", userRole = "Role" }: SidebarProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("sidebar-expanded") === "true";
+    }
+    return false;
+  });
   const [ngReports, setNgReports] = useState<NgReport[]>([]);
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
@@ -60,6 +65,13 @@ export const Sidebar = memo(function Sidebar({ userName = "User", userRole = "Ro
     window.addEventListener("resize", checkIfMobile);
     return () => window.removeEventListener("resize", checkIfMobile);
   }, []); // ✅ deps kosong — tidak trigger saat parent re-render
+
+  // ✅ SIMPAN STATE SIDEBAR KE LOCALSTORAGE
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("sidebar-expanded", String(isExpanded));
+    }
+  }, [isExpanded]);
 
   // ✅ Fetch NG reports — deps hanya currentRole (primitif string, stabil)
   useEffect(() => {
@@ -214,6 +226,65 @@ export const Sidebar = memo(function Sidebar({ userName = "User", userRole = "Ro
                 </svg>
               </span>
               {isExpanded && <span className="menu-label">Dashboard</span>}
+            </Link>
+            {/* STATUS PRE-ASSY */}
+            <Link
+              href="/status-pre-assy"
+              className={`menu-item ${currentPath === "/status-pre-assy" ? "active" : ""}`}
+              onClick={() => { if (isMobile) setIsExpanded(false); }}
+            >
+              <span className="menu-icon">
+                {/* Clipboard Check Icon */}
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+                  <path d="M9 12l2 2 4-4" />
+                  <path d="M12 3v4" />
+                  <rect x="5" y="7" width="14" height="14" rx="2" />
+                </svg>
+              </span>
+              {isExpanded && <span className="menu-label">Status Pre-Assy</span>}
+            </Link>
+
+            {/* STATUS FINAL-ASSY */}
+            <Link
+              href="/status-final-assy"
+              className={`menu-item ${currentPath === "/status-final-assy" ? "active" : ""}`}
+              onClick={() => { if (isMobile) setIsExpanded(false); }}
+            >
+              <span className="menu-icon">
+                {/* Gear / Process Icon */}
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+                  <circle cx="12" cy="12" r="3" />
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06
+                          a2 2 0 1 1-2.83 2.83l-.06-.06
+                          A1.65 1.65 0 0 0 15 19.4
+                          a1.65 1.65 0 0 0-1 .6
+                          a1.65 1.65 0 0 0-.33 1.82l.06.06
+                          a2 2 0 1 1-2.83 2.83l-.06-.06
+                          A1.65 1.65 0 0 0 9 19.4
+                          a1.65 1.65 0 0 0-1-.6
+                          a1.65 1.65 0 0 0-1.82.33l-.06.06
+                          a2 2 0 1 1-2.83-2.83l.06-.06
+                          A1.65 1.65 0 0 0 4.6 15
+                          a1.65 1.65 0 0 0-.6-1
+                          a1.65 1.65 0 0 0-1.82-.33l-.06.06
+                          a2 2 0 1 1-2.83-2.83l.06-.06
+                          A1.65 1.65 0 0 0 4.6 9
+                          a1.65 1.65 0 0 0 .6-1
+                          a1.65 1.65 0 0 0-.33-1.82l-.06-.06
+                          a2 2 0 1 1 2.83-2.83l.06.06
+                          A1.65 1.65 0 0 0 9 4.6
+                          c.3 0 .6-.1 1-.6
+                          a1.65 1.65 0 0 0 .33-1.82l-.06-.06
+                          a2 2 0 1 1 2.83 2.83l.06.06
+                          c.5.4.6.7.6 1s-.1.6-.6 1
+                          a1.65 1.65 0 0 0-.33 1.82
+                          c.2.4.5.6 1 .6
+                          c.3 0 .6-.1 1-.6l.06-.06
+                          a2 2 0 1 1 2.83 2.83l-.06.06
+                          c-.4.5-.6.7-.6 1s.1.6.6 1z" />
+                </svg>
+              </span>
+              {isExpanded && <span className="menu-label">Status Final-Assy</span>}
             </Link>
           </nav>
 
