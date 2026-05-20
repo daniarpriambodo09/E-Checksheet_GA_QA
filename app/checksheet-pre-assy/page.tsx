@@ -1,8 +1,20 @@
 // app/checksheet-pre-assy/page.tsx
+// [OFFLINE SAVE] Tambah support offline via saveChecklistOffline (IndexedDB).
+// Perubahan dari versi sebelumnya:
+//   1. Import saveChecklistOffline dari lib/offline/saveOffline
+//   2. Import saveCache, getCache untuk cache GET offline-first
+//   3. loadSavedResults: cache-first, API background merge, tidak ada reset setelah load
+//   4. updateLocalCachePreAssy: update cache GET lokal setelah setiap save
+//   5. handleSubmit: offline fallback via saveChecklistOffline
+// UI, payload, dan semua logika bisnis TIDAK berubah.
+
 "use client";
 import { useState, useEffect, useCallback, useMemo, useRef, Suspense } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { Sidebar } from "@/components/Sidebar";
+import { saveChecklistOffline } from "@/lib/offline/saveOffline";
+import { saveCache, getCache } from "@/lib/offline/cache";
+import { loadPhysicalBinding } from "@/lib/device/binding-storage";
 
 interface ChecklistItem { id: number; checkPoint: string; standard: string; }
 interface ChecklistResult { itemId: number; status: "OK" | "NG" | null; notes: string; }
@@ -76,6 +88,91 @@ const CATEGORY_ROLE_BADGE: Record<PreAssyCategoryCode, { label: string; cls: str
 };
 function getDefaultCategoryForRole(role: string): PreAssyCategoryCode {
   return role === "group-leader-qa" ? "pre-assy-daily-gl" : "pre-assy-daily-check-ins";
+}
+
+// ─── Helper: buat cacheKey konsisten ─────────────────────────────────────────
+// Format: `pre-assy-${categoryCode}-${areaCode}-${shift}-${dateKey}-${conveyor}-${specificArea||'all'}`
+// IDENTIK dengan yang dipakai sync.ts → tidak ada key mismatch
+function buildPreAssyCacheKey(
+  categoryCode: string,
+  areaCode: string,
+  shift: string,
+  dateKey: string,
+  conveyor: string,
+  specificArea: string
+): string {
+  const conveyorNorm     = conveyor.trim().toUpperCase() || 'default';
+  const specificAreaNorm = specificArea.trim() || 'all';
+  return `pre-assy-${categoryCode}-${areaCode}-${shift}-${dateKey}-${conveyorNorm}-${specificAreaNorm}`;
+}
+
+// ─── Helper: update cache GET lokal setelah save ─────────────────────────────
+// WAJIB dipanggil SECARA SERIAL — ini melakukan READ-MODIFY-WRITE ke key yang sama.
+// Jika diparalelkan (Promise.all), setiap call baca snapshot lama → item lain hilang.
+//
+// Format itemKey IDENTIK dengan API get-results (backend-pre-assy.txt):
+//   DCI:       `${itemId}-${specificArea || 'TENSILE'}-${shift}`
+//   CCStrip:   `${itemId}-${shift}-${timeSlot}` atau `${itemId}-${shift}`
+//   GL/Pjig:   `${itemId}-${shift}`
+//   CRT:       `${itemId}-${shift}` (resolvedItemId sudah merupakan DB id)
+async function updateLocalCachePreAssy(params: {
+  categoryCode: PreAssyCategoryCode;
+  areaCode: string;
+  shift: "A" | "B";
+  dateKey: string;
+  conveyor: string;
+  specificArea: string;
+  itemId: number;
+  status: "OK" | "NG";
+  ngDescription: string | null;
+  ngPhotos: string[] | null;
+  timeSlot: string;
+}): Promise<void> {
+  try {
+    const cacheKey = buildPreAssyCacheKey(
+      params.categoryCode, params.areaCode, params.shift,
+      params.dateKey, params.conveyor, params.specificArea
+    );
+
+    const existing = await getCache(cacheKey);
+    const base =
+      existing && existing.success && existing.formatted
+        ? { ...existing, formatted: { ...existing.formatted } }
+        : { success: true, formatted: {} };
+
+    if (!base.formatted[params.dateKey]) base.formatted[params.dateKey] = {};
+
+    // Build itemKey — format identik dengan API response
+    let itemKey: string;
+    if (params.categoryCode === 'pre-assy-daily-check-ins') {
+      const spec = params.specificArea.trim() || 'TENSILE';
+      itemKey = `${params.itemId}-${spec}-${params.shift}`;
+    } else if (params.categoryCode === 'pre-assy-cc-stripping-gl') {
+      itemKey = params.timeSlot
+        ? `${params.itemId}-${params.shift}-${params.timeSlot}`
+        : `${params.itemId}-${params.shift}`;
+    } else {
+      // pre-assy-daily-gl, pre-assy-pressure-jig, pre-assy-cs-remove-tool
+      itemKey = `${params.itemId}-${params.shift}`;
+    }
+
+    // ngPhotos: null jika kosong — konsisten dengan API response
+    const ngPhotosStr = Array.isArray(params.ngPhotos) && params.ngPhotos.length > 0
+      ? JSON.stringify(params.ngPhotos)
+      : null;
+
+    base.formatted[params.dateKey][itemKey] = {
+      status:        params.status,
+      ngDescription: params.ngDescription || '',
+      ngPhotos:      ngPhotosStr,
+      ngDepartment:  params.status === 'NG' ? 'QA' : null,
+    };
+
+    await saveCache(cacheKey, base);
+    console.log(`[updateLocalCachePreAssy] key=${itemKey} cacheKey=${cacheKey}`);
+  } catch (err) {
+    console.log('[updateLocalCachePreAssy] Error (non-fatal):', err);
+  }
 }
 
 const ITEMS_BY_CATEGORY: Record<PreAssyCategoryCode, ChecklistItem[]> = {
@@ -275,7 +372,6 @@ function ChecksheetPreAssyPageInner() {
   const [selectedDate, setSelectedDate] = useState<string>(() => getLocalDateKey(new Date()));
   const [selectedSpecificArea, setSelectedSpecificArea] = useState<string>("TENSILE");
 
-  // ── Conveyor state ────────────────────────────────────────────────
   const [conveyorInput, setConveyorInput]       = useState("");
   const [conveyorOptions, setConveyorOptions]   = useState<string[]>([]);
   const [selectedConveyor, setSelectedConveyor] = useState("");
@@ -295,6 +391,8 @@ function ChecksheetPreAssyPageInner() {
   const [isCheckingDuplicate, setIsCheckingDuplicate] = useState<number | null>(null);
   const [scannedGaugeIds, setScannedGaugeIds]         = useState<Record<number, string>>({});
   const isSubmittingRef = useRef(false);
+  // Request guard untuk loadSavedResults — hanya request terakhir yang update state
+  const loadSavedResultsRequestRef = useRef<number>(0);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -348,6 +446,9 @@ function ChecksheetPreAssyPageInner() {
   const [saveSuccess, setSaveSuccess]     = useState(false);
   const [photoZoomSrc, setPhotoZoomSrc]   = useState<string | null>(null);
 
+  // [PERUBAHAN 2] State baru untuk feedback offline save
+  const [offlineSaveCount, setOfflineSaveCount] = useState(0);
+
   const isDailyCheckIns = categoryCode === "pre-assy-daily-check-ins";
   const isCSRemoveTool  = categoryCode === "pre-assy-cs-remove-tool";
 
@@ -358,7 +459,6 @@ function ChecksheetPreAssyPageInner() {
     return DAILY_CHECK_INS_ITEMS.filter(item => allowed.includes(item.id));
   }, [isDailyCheckIns, selectedSpecificArea]);
 
-  // ── DCI Scan Mode ──────────────────────────────────────────────────
   const [dciScannedItemId, setDciScannedItemId] = useState<number | null>(null);
   const [dciCardVisible, setDciCardVisible]     = useState(false);
   const [dciSaveToast, setDciSaveToast]         = useState(false);
@@ -413,7 +513,6 @@ function ChecksheetPreAssyPageInner() {
     };
   }, [isDailyCheckIns, selectedConveyor, dciScannedItemId]);
 
-  // ── Tutup dropdown conveyor saat klik di luar ────────────────────
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Element;
@@ -516,20 +615,7 @@ function ChecksheetPreAssyPageInner() {
     checkDuplicate(itemId, clicked, doSetStatus);
   }, [flashDciSaveToast, checkDuplicate]);
 
-  // =====================================================================
-  // ✅ FIX: loadSavedResults — filter berdasarkan conveyor dengan benar
-  //
-  // BUG LAMA: URL hanya pakai &carline= tanpa &conveyor=, dan backend
-  // hanya filter jika (carline && line) keduanya truthy — karena line=""
-  // maka filter tidak jalan dan SEMUA conveyor dikembalikan.
-  //
-  // FIX:
-  // 1. Kirim &conveyor= secara eksplisit (backend baru support param ini)
-  // 2. Reset state SEBELUM fetch (eager clear) agar data lama tidak bocor
-  // 3. Jika tidak ada conveyor, langsung kosongkan state tanpa fetch
-  // =====================================================================
   const loadSavedResults = useCallback(async (conveyor?: string) => {
-    // FIX 3: Tidak ada conveyor → langsung kosongkan state, tidak fetch
     if (!userId || !areaCode || !conveyor) {
       setDciResults({});
       setResults({});
@@ -537,77 +623,43 @@ function ChecksheetPreAssyPageInner() {
       return;
     }
 
-    // FIX 2: EAGER RESET — kosongkan state SEBELUM fetch dimulai
-    // Ini mencegah data conveyor lama masih tampil saat fetch berjalan
-    setDciResults({});
-    setResults({});
-    setCrtResults({});
-    setScannedGaugeIds({});
-
+    // TIDAK reset state di sini — biarkan data lama tampil selama load
+    // State akan di-replace (bukan merge) setelah data baru siap
     setIsLoading(true);
     setError(null);
 
-    try {
-      const dateKey  = selectedDate;
-      const monthKey = dateKey.slice(0, 7);
+    const dateKey      = selectedDate;
+    const safeConveyor = conveyor.trim().toUpperCase();
+    const safeSpecArea = isDailyCheckIns ? selectedSpecificArea : '';
 
-      const isCCStripping = categoryCode === "pre-assy-cc-stripping-gl";
-      const timeSlotParam = isCCStripping
-        ? `&timeSlot=${encodeURIComponent(currentTimeSlotRef.current)}`
-        : "";
-      const specificAreaParam = isDailyCheckIns
-        ? `&specificArea=${encodeURIComponent(selectedSpecificArea)}`
-        : "";
+    // ── Build cacheKey — konsisten dengan updateLocalCachePreAssy dan sync.ts ──
+    const cacheKey = buildPreAssyCacheKey(
+      categoryCode, areaCode, shift, dateKey, safeConveyor, safeSpecArea
+    );
 
-      // FIX 1: Kirim `conveyor` secara eksplisit sebagai parameter tersendiri.
-      // Backend get-results (yang sudah di-fix) menggunakan param ini untuk
-      // filter COALESCE(r.conveyor, r.carline) = conveyor.
-      // Juga tetap kirim `carline` untuk backward compat dengan backend lama.
-      const url =
-        `/api/pre-assy/get-results?userId=${userId}` +
-        `&categoryCode=${categoryCode}` +
-        `&month=${monthKey}` +
-        `&areaCode=${encodeURIComponent(areaCode)}` +
-        `&conveyor=${encodeURIComponent(conveyor)}` +   // ← BARU: param eksplisit
-        `&carline=${encodeURIComponent(conveyor)}` +    // ← backward compat
-        `&line=` +                                       // ← kosong, tidak dipakai
-        timeSlotParam +
-        specificAreaParam;
+    // ── Request guard — hanya request terakhir yang boleh update state ────────
+    const requestId = Date.now();
+    loadSavedResultsRequestRef.current = requestId;
+    const isCurrentRequest = () => loadSavedResultsRequestRef.current === requestId;
 
-      const res  = await fetch(url);
-      if (!res.ok) {
-        console.error(`[loadSavedResults] HTTP ${res.status}`);
-        return;
-      }
-      const data = await res.json();
-
-      if (!data.success || !data.formatted) return;
-
-      const todayData = data.formatted[dateKey] || {};
+    // ── Helper: parse formatted data → set state ──────────────────────────────
+    const applyFormattedData = (formatted: Record<string, any>) => {
+      if (!isCurrentRequest()) return;
+      const todayData = formatted[dateKey] || {};
 
       if (categoryCode === "pre-assy-daily-check-ins") {
         const loadedDci: Record<number, DailyCheckInsResult> = {};
         const allowedIds = new Set(
           (PRE_ASSY_SPECIFIC_AREA_ITEMS[selectedSpecificArea] || []).map(Number)
         );
-
         Object.entries(todayData).forEach(([key, val]: [string, any]) => {
-          // Key format: "${item_id}-${specific_area}-${shift}"
           const lastDash  = key.lastIndexOf("-");
           const firstDash = key.indexOf("-");
           if (firstDash === -1 || lastDash === -1 || firstDash === lastDash) return;
-
           const itemId      = parseInt(key.slice(0, firstDash), 10);
           const keySpecArea = key.slice(firstDash + 1, lastDash);
           const keyShift    = key.slice(lastDash + 1);
-
-          if (
-            !isNaN(itemId) &&
-            keySpecArea === selectedSpecificArea &&
-            keyShift === shift &&
-            allowedIds.has(itemId) &&
-            DAILY_CHECK_INS_ITEMS.some(i => i.id === itemId)
-          ) {
+          if (!isNaN(itemId) && keySpecArea === selectedSpecificArea && keyShift === shift && allowedIds.has(itemId) && DAILY_CHECK_INS_ITEMS.some(i => i.id === itemId)) {
             let selectedNgChoices: string[] = [], ngOtherNote = "", ngPhotos: string[] = [];
             try {
               const parsed = JSON.parse(val.ngDescription || "{}");
@@ -618,27 +670,21 @@ function ChecksheetPreAssyPageInner() {
               }
             } catch { selectedNgChoices = []; }
             try { const pp = JSON.parse(val.ngPhotos || "[]"); if (Array.isArray(pp)) ngPhotos = pp; } catch { ngPhotos = []; }
-
             loadedDci[itemId] = {
               itemId,
               status: val.status === "OK" ? "OK" : val.status === "NG" ? "NG" : null,
-              selectedNgChoices,
-              ngOtherNote,
-              ngPhotos,
+              selectedNgChoices, ngOtherNote, ngPhotos,
             };
           }
         });
-
-        setDciResults(loadedDci);
+        if (isCurrentRequest()) setDciResults(loadedDci);
 
       } else if (categoryCode === "pre-assy-cs-remove-tool") {
         const loadedCrt: Record<number, CSRemoveToolResult> = {};
-
         Object.entries(todayData).forEach(([key, val]: [string, any]) => {
           const parts  = key.split("-");
           const toolNo = parseInt(parts[0], 10);
           let crtItemId: number;
-
           if (toolNo === 15) {
             const colorMap: Record<string, number> = { R: 15, G: 16, W: 17, Y: 18 };
             crtItemId = colorMap[parts[1]] ?? 15;
@@ -647,9 +693,7 @@ function ChecksheetPreAssyPageInner() {
           } else {
             crtItemId = toolNo;
           }
-
           if (isNaN(crtItemId)) return;
-
           if (val.status === "NG" || !loadedCrt[crtItemId]) {
             let selectedNgChoices: string[] = [], ngPhotos: string[] = [];
             try { const p = JSON.parse(val.ngDescription || "{}"); if (Array.isArray(p.choices)) selectedNgChoices = p.choices; } catch {}
@@ -657,18 +701,15 @@ function ChecksheetPreAssyPageInner() {
             loadedCrt[crtItemId] = {
               itemId: crtItemId,
               status: val.status === "OK" ? "OK" : val.status === "NG" ? "NG" : null,
-              selectedNgChoices,
-              ngPhotos,
+              selectedNgChoices, ngPhotos,
             };
           }
         });
-
-        setCrtResults(loadedCrt);
+        if (isCurrentRequest()) setCrtResults(loadedCrt);
 
       } else {
         const itemsForCategory = ITEMS_BY_CATEGORY[categoryCode] || [];
         const loaded: Record<number, ChecklistResult> = {};
-
         Object.entries(todayData).forEach(([key, val]: [string, any]) => {
           const dashIdx = key.indexOf("-");
           const itemId  = parseInt(dashIdx > 0 ? key.slice(0, dashIdx) : key, 10);
@@ -680,28 +721,83 @@ function ChecksheetPreAssyPageInner() {
             };
           }
         });
-
-        setResults(loaded);
+        if (isCurrentRequest()) setResults(loaded);
       }
+    };
 
-      console.log(`✅ [loadSavedResults] loaded for conveyor="${conveyor}" category=${categoryCode}`);
+    // ── STEP 1: Cache-first — tampilkan segera tanpa tunggu API ───────────────
+    // Ini yang fix "refresh offline → data hilang":
+    // cache sudah ada sejak save terakhir → langsung tampil di refresh pertama
+    try {
+      const cachedData = await getCache(cacheKey);
+      if (cachedData && cachedData.success && cachedData.formatted) {
+        const todayEntries = Object.keys(cachedData.formatted[dateKey] || {});
+        console.log(`[loadSavedResults] cache hit: ${todayEntries.length} entries`, cacheKey);
+        applyFormattedData(cachedData.formatted);
+      } else {
+        console.log(`[loadSavedResults] cache miss`, cacheKey);
+      }
+    } catch (cacheErr) {
+      console.log('[loadSavedResults] cache read error:', cacheErr);
+    }
 
-    } catch (err) {
-      console.error("❌ Load error:", err);
-    } finally {
+    // Unlock UI setelah cache diproses — tidak tunggu API
+    if (isCurrentRequest()) {
       setIsLoading(false);
+    }
+
+    // ── STEP 2: API background fetch — hanya saat online ─────────────────────
+    // API response di-MERGE ke state yang sudah ada dari cache.
+    // Data offline yang belum tersync (ada di cache tapi belum di API) dipertahankan.
+    if (!navigator.onLine) return;
+
+    try {
+      const monthKey = dateKey.slice(0, 7);
+      const isCCStripping = categoryCode === "pre-assy-cc-stripping-gl";
+      const timeSlotParam = isCCStripping
+        ? `&timeSlot=${encodeURIComponent(currentTimeSlotRef.current)}` : "";
+      const specificAreaParam = isDailyCheckIns
+        ? `&specificArea=${encodeURIComponent(selectedSpecificArea)}` : "";
+
+      const url =
+        `/api/pre-assy/get-results?userId=${userId}` +
+        `&categoryCode=${categoryCode}` +
+        `&month=${monthKey}` +
+        `&areaCode=${encodeURIComponent(areaCode)}` +
+        `&conveyor=${encodeURIComponent(safeConveyor)}` +
+        `&carline=${encodeURIComponent(safeConveyor)}` +
+        `&line=` +
+        timeSlotParam +
+        specificAreaParam;
+
+      const res = await fetch(url);
+      if (!res.ok) {
+        console.log(`[loadSavedResults] API HTTP ${res.status}`);
+        return;
+      }
+      const data = await res.json();
+      if (!data.success || !data.formatted) return;
+
+      // Simpan ke cache untuk request berikutnya / offline
+      await saveCache(cacheKey, data);
+
+      if (!isCurrentRequest()) return;
+
+      // Apply data API — ini menggantikan state dari cache dengan data server terbaru
+      // Aman karena: jika item ada di cache (offline) tapi tidak di API,
+      // setelah sync berhasil API akan mengembalikan item tersebut
+      applyFormattedData(data.formatted);
+      console.log(`[loadSavedResults] API applied & cached`, cacheKey);
+
+    } catch (apiErr) {
+      console.log('[loadSavedResults] API fetch error (cache masih tampil):', apiErr);
     }
   }, [userId, areaCode, categoryCode, selectedDate, selectedSpecificArea, shift, isDailyCheckIns]);
 
-  // ── Trigger loadSavedResults ketika conveyor/date/area/specificArea berubah ──
-  // FIX: Saat selectedConveyor berubah, useEffect ini:
-  // 1. Memanggil loadSavedResults yang sudah melakukan eager reset
-  // 2. Jika conveyor kosong, langsung reset state tanpa fetch
   useEffect(() => {
     if (!areaCode || !userId || !categoryCode) return;
 
     if (!selectedConveyor) {
-      // FIX: Konveyor belum dipilih → kosongkan state segera
       setDciResults({});
       setResults({});
       setCrtResults({});
@@ -713,20 +809,17 @@ function ChecksheetPreAssyPageInner() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [areaCode, userId, categoryCode, selectedConveyor, selectedDate, selectedSpecificArea, shift]);
 
-  // ── Reload saat time slot berubah (CC Stripping) ──────────────────
   const prevTimeSlotRef = useRef<string>(currentTimeSlot);
   useEffect(() => {
     if (categoryCode !== "pre-assy-cc-stripping-gl") return;
     if (currentTimeSlot === prevTimeSlotRef.current) return;
     prevTimeSlotRef.current = currentTimeSlot;
-    // FIX: Reset sebelum reload
     setResults({});
     setDciResults({});
     if (selectedConveyor) loadSavedResults(selectedConveyor);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentTimeSlot]);
 
-  // ── Fetch daftar conveyor dari API ────────────────────────────────
   const fetchConveyorOptions = useCallback(async (code: string) => {
     if (!code) return;
     try {
@@ -755,13 +848,11 @@ function ChecksheetPreAssyPageInner() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [areaCode, fetchConveyorOptions]);
 
-  // ── Tambah conveyor baru ──────────────────────────────────────────
   const handleAddConveyor = async () => {
     const cv = conveyorInput.trim().toUpperCase();
     if (!cv) { setConveyorError("Nama conveyor harus diisi."); return; }
 
     if (conveyorOptions.some(o => o.toUpperCase() === cv)) {
-      // FIX: Reset state sebelum set conveyor baru
       setDciResults({});
       setResults({});
       setCrtResults({});
@@ -789,7 +880,6 @@ function ChecksheetPreAssyPageInner() {
         const errData = await res.json().catch(() => ({}));
         if (res.status === 409) {
           setConveyorOptions(prev => prev.includes(cv) ? prev : [...prev, cv]);
-          // FIX: Reset state sebelum set conveyor
           setDciResults({});
           setResults({});
           setCrtResults({});
@@ -803,7 +893,6 @@ function ChecksheetPreAssyPageInner() {
       }
 
       setConveyorOptions(prev => [...prev, cv]);
-      // FIX: Reset state sebelum set conveyor baru
       setDciResults({});
       setResults({});
       setCrtResults({});
@@ -818,7 +907,6 @@ function ChecksheetPreAssyPageInner() {
     }
   };
 
-  // ── Hapus conveyor dari daftar ────────────────────────────────────
   const handleDeleteConveyor = async (cv: string) => {
     if (!window.confirm(`Hapus conveyor "${cv}" dari daftar?`)) return;
 
@@ -843,10 +931,8 @@ function ChecksheetPreAssyPageInner() {
         throw new Error(errData.error || 'Gagal menghapus conveyor.');
       }
 
-      // Hapus dari local list
       setConveyorOptions(prev => prev.filter(item => item !== cv));
 
-      // Jika conveyor yang dihapus sedang aktif → reset state
       if (selectedConveyor === cv) {
         setSelectedConveyor('');
         setDciResults({});
@@ -856,7 +942,6 @@ function ChecksheetPreAssyPageInner() {
         setSaveSuccess(false);
       }
 
-      // Refresh list dari server
       if (areaCode) fetchConveyorOptions(areaCode);
 
     } catch (err: any) {
@@ -946,7 +1031,7 @@ function ChecksheetPreAssyPageInner() {
     setSaveSuccess(false);
   }, []);
 
-  // ── handleSubmit ──────────────────────────────────────────────────
+  // ── handleSubmit ──────────────────────────────────────────────────────────
   const handleSubmit = async () => {
     if (!userId || !areaCode) { alert("❌ User atau area tidak ditemukan. Silakan scan ulang QR Code."); return; }
     if (!selectedConveyor) { alert("⚠️ Silakan pilih atau tambahkan Conveyor terlebih dahulu."); return; }
@@ -985,40 +1070,55 @@ function ChecksheetPreAssyPageInner() {
     }
 
     isSubmittingRef.current = true;
-    setIsSubmitting(true); setSaveSuccess(false);
+    setIsSubmitting(true);
+    setSaveSuccess(false);
+    setOfflineSaveCount(0);
 
     try {
-      const saveResults = await Promise.all(
-        itemsToProcess.map(async item => {
-          let status: "OK" | "NG", ngDescription: string | null, ngPhotosVal: string[] | null = null;
+      // ── TAHAP 1: Kumpulkan semua data item ────────────────────────────────
+      type PreparedItem = {
+        item: typeof itemsToProcess[0];
+        resolvedItemId: number;
+        status: "OK" | "NG";
+        ngDescription: string | null;
+        ngPhotosVal: string[] | null;
+        timeSlotVal: string;
+      };
+      const preparedItems: PreparedItem[] = [];
 
-          if (isDailyCheckIns) {
-            const r = dciResults[item.id]; if (!r || r.status === null) return { ok: true };
-            status = r.status;
-            ngDescription = status === "NG" ? JSON.stringify({ choices: r.selectedNgChoices || [], other: r.ngOtherNote?.trim() || "" }) : null;
-            ngPhotosVal = status === "NG" ? (r.ngPhotos || []) : null;
-          } else if (isCSRemoveTool) {
-            const r = crtResults[item.id]; if (!r || r.status === null) return { ok: true };
-            status = r.status;
-            ngDescription = status === "NG" ? JSON.stringify({ choices: r.selectedNgChoices || [], other: "" }) : null;
-            ngPhotosVal = status === "NG" ? (r.ngPhotos || []) : null;
-          } else {
-            const r = results[item.id]; if (!r || r.status === null) return { ok: true };
-            status = r.status; ngDescription = status === "NG" ? (r.notes || "") : null;
-          }
+      for (const item of itemsToProcess) {
+        let status: "OK" | "NG", ngDescription: string | null, ngPhotosVal: string[] | null = null;
 
-          const resolvedItemId = isCSRemoveTool
-            ? (CRT_FRONTEND_TO_DB_ITEMID[`${item.id}-${shift}`] ?? item.id)
-            : item.id;
+        if (isDailyCheckIns) {
+          const r = dciResults[item.id]; if (!r || r.status === null) continue;
+          status = r.status;
+          ngDescription = status === "NG" ? JSON.stringify({ choices: r.selectedNgChoices || [], other: r.ngOtherNote?.trim() || "" }) : null;
+          ngPhotosVal = status === "NG" ? (r.ngPhotos || []) : null;
+        } else if (isCSRemoveTool) {
+          const r = crtResults[item.id]; if (!r || r.status === null) continue;
+          status = r.status;
+          ngDescription = status === "NG" ? JSON.stringify({ choices: r.selectedNgChoices || [], other: "" }) : null;
+          ngPhotosVal = status === "NG" ? (r.ngPhotos || []) : null;
+        } else {
+          const r = results[item.id]; if (!r || r.status === null) continue;
+          status = r.status; ngDescription = status === "NG" ? (r.notes || "") : null;
+        }
 
-          const timeSlotVal = isDailyCheckIns
-            ? (scannedGaugeIds[item.id] || "")
-            : categoryCode === "pre-assy-cc-stripping-gl" ? currentTimeSlotRef.current : "";
+        const resolvedItemId = isCSRemoveTool
+          ? (CRT_FRONTEND_TO_DB_ITEMID[`${item.id}-${shift}`] ?? item.id)
+          : item.id;
 
-          // ✅ FIX: Kirim conveyor sebagai KEDUA field untuk kompatibilitas:
-          // - `conveyor`: kolom baru di checklist_results, dipakai get-results baru
-          // - `carline`:  kolom lama, backward compat dengan DB / backend lama
-          // Backend save-result menyimpan keduanya sekaligus.
+        const timeSlotVal = isDailyCheckIns
+          ? (scannedGaugeIds[item.id] || "")
+          : categoryCode === "pre-assy-cc-stripping-gl" ? currentTimeSlotRef.current : "";
+
+        preparedItems.push({ item, resolvedItemId, status, ngDescription, ngPhotosVal, timeSlotVal });
+      }
+
+      // ── TAHAP 2: Kirim ke API atau simpan offline — boleh parallel ────────
+      type SaveResult = { ok: boolean; offline: boolean; resolvedItemId: number; status: "OK"|"NG"; ngDescription: string|null; ngPhotosVal: string[]|null; timeSlotVal: string; };
+      const saveResults: SaveResult[] = await Promise.all(
+        preparedItems.map(async ({ item, resolvedItemId, status, ngDescription, ngPhotosVal, timeSlotVal }) => {
           const payload = {
             userId,
             categoryCode,
@@ -1031,37 +1131,81 @@ function ChecksheetPreAssyPageInner() {
             ngPhotos: ngPhotosVal,
             timeSlot: timeSlotVal,
             areaCode,
-            conveyor: selectedConveyor || null,   // ← kolom baru
-            carline:  selectedConveyor || null,   // ← backward compat
-            line:     "",                          // ← selalu kosong
+            conveyor: selectedConveyor || null,
+            carline:  selectedConveyor || null,
+            line:     "",
             specificArea: isDailyCheckIns ? selectedSpecificArea : null,
+            deviceCode: loadPhysicalBinding()?.device_code ?? null,
           };
 
-          const res = await fetch("/api/pre-assy/save-result", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          });
-
-          if (!res.ok) {
-            const errData = await res.json().catch(() => ({}));
-            if (res.status === 409 && errData.error === "DUPLICATE_ITEM") {
-              const itemInfo  = DAILY_CHECK_INS_ITEMS.find(i => i.id === item.id);
-              const itemCheck = itemInfo?.itemCheck ?? `Item ${item.id}`;
-              const locations: string[] = (errData.duplicates || []).map((d: any) => d.description).filter(Boolean);
-              setDciResults(prev => { const { [item.id]: _, ...rest } = prev; return rest; });
-              setScannedGaugeIds(prev => { const { [item.id]: _, ...rest } = prev; return rest; });
-              throw { isDuplicateError: true, itemCheck, locations };
-            }
-            return { ok: false };
+          if (!navigator.onLine) {
+            await saveChecklistOffline("/api/pre-assy/save-result", payload);
+            return { ok: true, offline: true, resolvedItemId, status, ngDescription, ngPhotosVal, timeSlotVal };
           }
-          return { ok: true };
+
+          try {
+            const res = await fetch("/api/pre-assy/save-result", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            });
+
+            if (!res.ok) {
+              const errData = await res.json().catch(() => ({}));
+              if (res.status === 409 && errData.error === "DUPLICATE_ITEM") {
+                const itemInfo  = DAILY_CHECK_INS_ITEMS.find(i => i.id === item.id);
+                const itemCheck = itemInfo?.itemCheck ?? `Item ${item.id}`;
+                const locations: string[] = (errData.duplicates || []).map((d: any) => d.description).filter(Boolean);
+                setDciResults(prev => { const { [item.id]: _, ...rest } = prev; return rest; });
+                setScannedGaugeIds(prev => { const { [item.id]: _, ...rest } = prev; return rest; });
+                throw { isDuplicateError: true, itemCheck, locations };
+              }
+              await saveChecklistOffline("/api/pre-assy/save-result", payload);
+              return { ok: true, offline: true, resolvedItemId, status, ngDescription, ngPhotosVal, timeSlotVal };
+            }
+
+            return { ok: true, offline: false, resolvedItemId, status, ngDescription, ngPhotosVal, timeSlotVal };
+
+          } catch (fetchErr: any) {
+            if (fetchErr?.isDuplicateError) throw fetchErr;
+            await saveChecklistOffline("/api/pre-assy/save-result", payload);
+            return { ok: true, offline: true, resolvedItemId, status, ngDescription, ngPhotosVal, timeSlotVal };
+          }
         })
       );
 
-      const failed = saveResults.filter(r => !r.ok);
-      if (failed.length > 0) alert(`⚠️ ${failed.length} item gagal disimpan.`);
-      else { setSaveSuccess(true); setTimeout(() => setSaveSuccess(false), 3000); }
+      // ── TAHAP 3: Update cache GET — WAJIB SERIAL (bukan Promise.all) ──────
+      // READ-MODIFY-WRITE ke cacheKey yang sama.
+      // Jika diparalelkan: semua baca snapshot lama → item lain hilang dari cache.
+      for (const r of saveResults) {
+        await updateLocalCachePreAssy({
+          categoryCode,
+          areaCode,
+          shift,
+          dateKey: selectedDate,
+          conveyor: selectedConveyor || '',
+          specificArea: isDailyCheckIns ? selectedSpecificArea : '',
+          itemId: r.resolvedItemId,
+          status: r.status,
+          ngDescription: r.ngDescription,
+          ngPhotos: r.ngPhotosVal,
+          timeSlot: r.timeSlotVal,
+        });
+      }
+
+      const offlineItems = saveResults.filter(r => r.offline).length;
+      const failedItems  = saveResults.filter(r => !r.ok).length;
+
+      if (failedItems > 0) {
+        alert(`⚠️ ${failedItems} item gagal disimpan.`);
+      } else {
+        setSaveSuccess(true);
+        setOfflineSaveCount(offlineItems);
+        setTimeout(() => {
+          setSaveSuccess(false);
+          setOfflineSaveCount(0);
+        }, 4000);
+      }
 
     } catch (err: any) {
       console.error("❌ Save error:", err);
@@ -1163,7 +1307,6 @@ function ChecksheetPreAssyPageInner() {
               value={shift}
               onChange={e => {
                 setShift(e.target.value as "A" | "B");
-                // FIX: Reset state saat shift berubah, data akan di-reload oleh useEffect
                 setDciResults({});
                 setResults({});
                 setCrtResults({});
@@ -1182,7 +1325,6 @@ function ChecksheetPreAssyPageInner() {
                 value={selectedDate}
                 onChange={e => {
                   setSelectedDate(e.target.value);
-                  // FIX: Reset state saat tanggal berubah
                   setResults({});
                   setDciResults({});
                   setCrtResults({});
@@ -1210,7 +1352,6 @@ function ChecksheetPreAssyPageInner() {
                   value={selectedSpecificArea}
                   onChange={e => {
                     setSelectedSpecificArea(e.target.value);
-                    // FIX: Reset DCI state saat area spesifik berubah
                     setDciResults({});
                     setScannedGaugeIds({});
                     setSaveSuccess(false);
@@ -1250,13 +1391,11 @@ function ChecksheetPreAssyPageInner() {
             )}
           </div>
 
-          {/* Dropdown custom dengan tombol hapus × per item */}
           {conveyorOptions.length > 0 && (
             <div className="carline-row">
               <label className="carline-label">Pilih Conveyor</label>
 
               <div className={`pa-conveyor-dropdown-container ${isDropdownOpen ? "open" : ""}`}>
-                {/* Trigger button */}
                 <button
                   type="button"
                   className="pa-conveyor-dropdown-trigger"
@@ -1267,7 +1406,6 @@ function ChecksheetPreAssyPageInner() {
                   <span className="pa-conveyor-dropdown-arrow">▼</span>
                 </button>
 
-                {/* Dropdown menu */}
                 {isDropdownOpen && (
                   <div className="pa-conveyor-dropdown-menu">
                     {conveyorOptions.map(cv => (
@@ -1275,7 +1413,6 @@ function ChecksheetPreAssyPageInner() {
                         key={cv}
                         className={`pa-conveyor-dropdown-item ${selectedConveyor === cv ? "selected" : ""}`}
                       >
-                        {/* Pilih conveyor */}
                         <button
                           type="button"
                           className="pa-conveyor-dropdown-item-btn"
@@ -1293,7 +1430,6 @@ function ChecksheetPreAssyPageInner() {
                           {cv}
                         </button>
 
-                        {/* Tombol hapus × */}
                         <button
                           type="button"
                           className="pa-conveyor-delete-btn"
@@ -1323,7 +1459,6 @@ function ChecksheetPreAssyPageInner() {
             </div>
           )}
 
-          {/* Input tambah conveyor baru */}
           <div className="carline-add-section">
             <p className="carline-add-label">
               {conveyorOptions.length === 0 ? "Belum ada Conveyor. Tambahkan:" : "Tambah Conveyor baru:"}
@@ -1373,10 +1508,20 @@ function ChecksheetPreAssyPageInner() {
               </div>
             </div>
 
-            {saveSuccess && (
+            {/* [PERUBAHAN 2] Banner sukses — bedakan online vs offline */}
+            {saveSuccess && offlineSaveCount === 0 && (
               <div className="success-banner">
                 <span>✅</span>
                 <span>Checklist berhasil disimpan!</span>
+              </div>
+            )}
+            {saveSuccess && offlineSaveCount > 0 && (
+              <div style={{ background:"#fef3c7", border:"1px solid #fcd34d", borderLeft:"4px solid #f59e0b", borderRadius:8, padding:"12px 16px", marginBottom:16, display:"flex", alignItems:"center", gap:12, color:"#92400e", fontSize:14, fontWeight:500 }}>
+                <span>🟡</span>
+                <span>
+                  <strong>{offlineSaveCount} item</strong> disimpan offline (tidak ada koneksi).
+                  Data akan otomatis dikirim saat online kembali.
+                </span>
               </div>
             )}
             {error && (
@@ -1454,7 +1599,6 @@ function ChecksheetPreAssyPageInner() {
 
                   {dciSaveToast && <div className="dci-save-toast">✓ TERSIMPAN</div>}
 
-                  {/* Standby screen */}
                   {dciScannedItemId === null && (
                     <div className="dci-standby">
                       <div className="dci-standby-scan-zone">
@@ -1512,7 +1656,6 @@ function ChecksheetPreAssyPageInner() {
                     </div>
                   )}
 
-                  {/* Scan card */}
                   {dciScannedItemId !== null && (() => {
                     const item = DAILY_CHECK_INS_ITEMS.find(i => i.id === dciScannedItemId)!;
                     const dciResult = dciResults[item.id];
@@ -1702,7 +1845,6 @@ function ChecksheetPreAssyPageInner() {
                   })()}
                 </div>
 
-              /* ── CS REMOVE TOOL ── */
               ) : isCSRemoveTool ? (
                 CS_REMOVE_TOOL_CHECKSHEET_ITEMS.map((item, index) => {
                   const crtResult = crtResults[item.id];
@@ -1786,7 +1928,6 @@ function ChecksheetPreAssyPageInner() {
                   );
                 })
 
-              /* ── GL / CC STRIPPING / PRESSURE JIG ── */
               ) : (
                 checklistItems.map((item, index) => {
                   const result = results[item.id];
@@ -1952,8 +2093,6 @@ function ChecksheetPreAssyPageInner() {
         .carline-title{margin:0;font-size:15px;font-weight:700;color:#1e293b;}
         .carline-row{margin-bottom:14px;}
         .carline-label{display:block;font-size:13px;font-weight:600;color:#64748b;margin-bottom:6px;}
-        .carline-select{width:100%;padding:10px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:14px;font-weight:600;color:#1e293b;background:#f8fafc;cursor:pointer;outline:none;transition:border-color 0.2s;}
-        .carline-select:focus{border-color:#f59e0b;}
         .carline-add-section{background:#fffbeb;border:1px dashed #fcd34d;border-radius:10px;padding:12px 14px;}
         .carline-add-label{margin:0 0 10px;font-size:13px;color:#92400e;font-weight:600;}
         .carline-inputs{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
@@ -2149,7 +2288,6 @@ function ChecksheetPreAssyPageInner() {
         @keyframes spin{to{transform:rotate(360deg);}}
         @media(max-width:768px){.main-content{margin-left:0;padding:12px;}.submit-section{left:0;padding:10px 16px;}.carline-inputs{flex-direction:column;align-items:stretch;}}
 
-        /* ── Custom Conveyor Dropdown ── */
         .pa-conveyor-dropdown-container{position:relative;width:100%;}
         .pa-conveyor-dropdown-trigger{width:100%;padding:10px 14px;border:2px solid #e2e8f0;border-radius:10px;background:white;font-size:14px;font-weight:600;color:#1e293b;cursor:pointer;display:flex;justify-content:space-between;align-items:center;text-align:left;text-transform:uppercase;transition:border-color 0.15s;box-sizing:border-box;}
         .pa-conveyor-dropdown-trigger:hover:not(:disabled){border-color:#f59e0b;background:#fffbeb;}

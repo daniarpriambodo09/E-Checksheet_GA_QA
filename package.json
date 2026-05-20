@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "next build",
+    "build": "next build --webpack",
     "dev": "next dev -p 3093",
     "lint": "next lint .",
     "start": "next start",
@@ -50,6 +50,7 @@
     "clsx": "^2.1.1",
     "cmdk": "1.0.4",
     "date-fns": "^4.1.0",
+    "dexie": "^4.4.2",
     "dotenv": "^17.2.3",
     "embla-carousel-react": "8.5.1",
     "html5-qrcode": "^2.3.8",

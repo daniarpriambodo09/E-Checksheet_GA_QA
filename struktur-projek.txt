@@ -1,6 +1,28 @@
 ├── app
+│   ├── admin
+│   │   ├── qr-codes
+│   │   │   ├── page.tsx
+│   │   │   ├── page.txt
+│   │   ├── qr-generator
+│   │   │   ├── edit-modal.txt
+│   │   │   ├── page.tsx
 │   ├── api
+│   │   ├── admin
+│   │   │   ├── areas
+│   │   │   │   ├── route.ts
+│   │   │   ├── categories
+│   │   │   │   ├── route.ts
+│   │   │   ├── gauge-qr-codes
+│   │   │   │   ├── route.ts
+│   │   │   ├── gauge-types
+│   │   │   │   ├── route.ts
+│   │   │   ├── qr-codes
+│   │   │   │   ├── route.ts
 │   │   ├── areas
+│   │   │   ├── generate-qr
+│   │   │   │   ├── route.ts
+│   │   │   ├── get-all
+│   │   │   │   ├── route.ts
 │   │   │   ├── get-by-category
 │   │   │   │   ├── route.ts
 │   │   ├── auth
@@ -8,21 +30,37 @@
 │   │   │   │   ├── route.ts
 │   │   │   ├── signup
 │   │   │   │   ├── route.ts
+│   │   ├── conveyors
+│   │   │   ├── route.ts
 │   │   ├── dashboard
 │   │   │   ├── get-categories
 │   │   │   │   ├── route.ts
 │   │   │   ├── get-data
 │   │   │   │   ├── route.ts
 │   │   ├── final-assy
+│   │   │   ├── check-duplicate
+│   │   │   │   ├── route.ts
+│   │   │   ├── delete-conveyor
+│   │   │   │   ├── route.ts
+│   │   │   ├── get-area-id
+│   │   │   │   ├── route.ts
+│   │   │   ├── get-carline-line
+│   │   │   │   ├── route.ts
 │   │   │   ├── get-checklist-items
 │   │   │   │   ├── route.ts
 │   │   │   ├── get-results
 │   │   │   │   ├── route.ts
 │   │   │   ├── get-signatures
 │   │   │   │   ├── route.ts
+│   │   │   ├── save-carline-line
+│   │   │   │   ├── route.ts
+│   │   │   ├── save-conveyor
+│   │   │   │   ├── route.ts
 │   │   │   ├── save-result
 │   │   │   │   ├── route.ts
 │   │   │   ├── save-signature
+│   │   │   │   ├── route.ts
+│   │   │   ├── upload-image
 │   │   │   │   ├── route.ts
 │   │   ├── gauges
 │   │   │   ├── checkpoints
@@ -42,14 +80,32 @@
 │   │   │   ├── scanned-history
 │   │   │   │   ├── route.ts
 │   │   ├── pre-assy
+│   │   │   ├── check-duplicate
+│   │   │   │   ├── route.ts
+│   │   │   ├── delete-conveyor
+│   │   │   │   ├── route.ts
+│   │   │   ├── get-carline-line
+│   │   │   │   ├── route.ts
 │   │   │   ├── get-results
 │   │   │   │   ├── route.ts
 │   │   │   ├── get-signatures
+│   │   │   │   ├── route.ts
+│   │   │   ├── save-carline-line
+│   │   │   │   ├── route.ts
+│   │   │   ├── save-conveyor
 │   │   │   │   ├── route.ts
 │   │   │   ├── save-result
 │   │   │   │   ├── route.ts
 │   │   │   ├── save-signature
 │   │   │   │   ├── route.ts
+│   │   ├── upload-image
+│   │   │   ├── route.ts
+│   ├── checksheet-final-assy
+│   │   ├── page.tsx
+│   │   ├── page.txt
+│   ├── checksheet-pre-assy
+│   │   ├── comst_page.txt
+│   │   ├── page.tsx
 │   ├── cs-remove-tool
 │   │   ├── page.tsx
 │   ├── dashboard
@@ -73,6 +129,8 @@
 │   ├── qa-dashboard
 │   │   ├── page.tsx
 │   │   ├── page.txt
+│   ├── scan-qr
+│   │   ├── page.tsx
 │   ├── signup-page
 │   │   ├── page.tsx
 │   ├── status-final-assy
@@ -91,34 +149,138 @@
 │   ├── layout.tsx
 │   ├── page.tsx
 ├── components
+│   ├── ChecksheetComponents
+│   │   ├── CarlineLineFilter.tsx
+│   │   ├── CarlineLineSection.tsx
+│   │   ├── ConveyorSection.tsx
 │   ├── ui
+│   │   ├── accordion.tsx
+│   │   ├── alert-dialog.tsx
+│   │   ├── alert.tsx
+│   │   ├── aspect-ratio.tsx
+│   │   ├── avatar.tsx
+│   │   ├── badge.tsx
+│   │   ├── breadcrumb.tsx
+│   │   ├── button-group.tsx
+│   │   ├── button.tsx
+│   │   ├── calendar.tsx
+│   │   ├── card.tsx
+│   │   ├── carousel.tsx
+│   │   ├── chart.tsx
+│   │   ├── checkbox.tsx
+│   │   ├── collapsible.tsx
+│   │   ├── command.tsx
+│   │   ├── context-menu.tsx
 │   │   ├── detailmodal.tsx
+│   │   ├── dialog.tsx
+│   │   ├── drawer.tsx
+│   │   ├── dropdown-menu.tsx
+│   │   ├── empty.tsx
+│   │   ├── field.tsx
+│   │   ├── form.tsx
+│   │   ├── hover-card.tsx
+│   │   ├── input-group.tsx
+│   │   ├── input-otp.tsx
+│   │   ├── input.tsx
+│   │   ├── item.tsx
+│   │   ├── kbd.tsx
+│   │   ├── label.tsx
+│   │   ├── menubar.tsx
+│   │   ├── navigation-menu.tsx
+│   │   ├── pagination.tsx
+│   │   ├── popover.tsx
+│   │   ├── progress.tsx
+│   │   ├── radio-group.tsx
+│   │   ├── resizable.tsx
+│   │   ├── scroll-area.tsx
+│   │   ├── select.tsx
+│   │   ├── separator.tsx
+│   │   ├── sheet.tsx
+│   │   ├── sidebar.tsx
+│   │   ├── skeleton.tsx
+│   │   ├── slider.tsx
+│   │   ├── sonner.tsx
+│   │   ├── spinner.tsx
+│   │   ├── switch.tsx
+│   │   ├── table.tsx
+│   │   ├── tabs.tsx
+│   │   ├── textarea.tsx
+│   │   ├── toast.tsx
+│   │   ├── toaster.tsx
+│   │   ├── toggle-group.tsx
+│   │   ├── toggle.tsx
+│   │   ├── tooltip.tsx
+│   │   ├── use-mobile.tsx
+│   │   ├── use-toast.ts
 │   ├── AreaFilter.tsx
 │   ├── chat-component.tsx
+│   ├── ConveyorOnlySelector.tsx
+│   ├── ConveyorPatternSelector.tsx
 │   ├── GaugeScanModal.tsx
 │   ├── navbar-fixed.tsx
 │   ├── navbar-static.tsx
+│   ├── NGPhotoUpload.tsx
 │   ├── ScanGaugeButton.tsx
 │   ├── Sidebar.tsx
 │   ├── Sidebar.txt
+│   ├── SyncListener.tsx
 │   ├── theme-provider.tsx
 ├── hooks
 │   ├── use-mobile.ts
 │   ├── use-toast.ts
+│   ├── useHomeData.ts
+│   ├── useSync.ts
 ├── image
 │   ├── push-gauge-01.png
 │   ├── push-gauge-02.png
 ├── lib
+│   ├── offline
+│   │   ├── cache.ts
+│   │   ├── db.ts
+│   │   ├── saveOffline.ts
+│   │   ├── sync.ts
 │   ├── types
 │   │   ├── gauge.ts
 │   ├── auth-context.tsx
+│   ├── auth-server.ts
 │   ├── auth.ts
 │   ├── db-helpers.ts
 │   ├── db.ts
+│   ├── fa-dci-schedule.ts
 │   ├── utils.ts
 ├── migration
 │   ├── schema.sql
 ├── public
+│   ├── images
+│   │   ├── logo.png
+│   │   ├── yazaki-logo.jpg
+│   ├── uploads
+│   │   ├── checksheet
+│   │   │   ├── 1776931955569-o5t5i8.jpg
+│   │   │   ├── 1776933076223-gz6kd2.jpg
+│   │   │   ├── 1776935067408-finpbx.jpg
+│   │   │   ├── 1776935947129-h7xlsn.jpg
+│   │   │   ├── 1776935977678-y2frn7.jpg
+│   │   │   ├── 1776936128970-qzbtfq.jpg
+│   │   │   ├── 1776974918795-srhxey.jpg
+│   │   │   ├── 1776975942326-hogdqb.jpg
+│   │   │   ├── 1776976540884-o24z48.jpg
+│   │   │   ├── 1776976699335-p076s9.jpg
+│   │   │   ├── 1776977190136-tqi9do.jpg
+│   │   │   ├── 1776977387826-3mha30.jpg
+│   │   │   ├── 1776977477029-dxn2su.jpg
+│   │   │   ├── 1776978238873-1wz2u8.jpg
+│   │   │   ├── 1776978285156-5badp0.jpg
+│   │   │   ├── 1776979309149-h3p886.jpg
+│   │   │   ├── 1776979848124-8w08qi.jpg
+│   │   │   ├── 1776980664625-j9c18g.jpg
+│   │   │   ├── 1776981679563-fhjdfv.jpg
+│   │   │   ├── 1776983669483-0begw0.png
+│   │   │   ├── 1776983880605-3ss9rn.jpg
+│   │   │   ├── 1776984262077-g4eie6.jpg
+│   │   │   ├── 1776984267193-bfx7ka.jpg
+│   │   │   ├── 1776984430372-ua725t.jpg
+│   │   │   ├── 1776991765139-i7cl9w.jpg
 │   ├── apple-icon.png
 │   ├── file.svg
 │   ├── globe.svg
@@ -135,11 +297,21 @@
 │   ├── window.svg
 ├── .env.local
 ├── .gitignore
+├── backend-admin.txt
+├── backend-areas.txt
+├── backend-conveyor.txt
+├── backend-final-assy.txt
+├── backend-gauge.txt
+├── backend-pre-assy.txt
+├── backup.sql
+├── checklist_items.sql
 ├── components.json
 ├── daftar-kode.txt
 ├── eslint.config.mjs
 ├── items_faGL.txt
 ├── items-remove-tool.txt
+├── kode-gauge.txt
+├── middleware.ts
 ├── next-env.d.ts
 ├── next.config.mjs
 ├── nextconfig_backup.ts
@@ -150,4 +322,7 @@
 ├── struktur-database.txt
 ├── struktur-projek.txt
 ├── tailwind.config.ts
+├── test-items.txt
+├── text.txt
+├── tmp_inspect_ng_photos.js
 ├── tsconfig.json

@@ -1,4 +1,23 @@
 // app/status-pre-assy/page.tsx
+// UPDATED: OK status sekarang bisa diklik — menampilkan modal detail
+// (submittedBy, submittedAt, shift, tanggal, deviceCode)
+// UI modal mengikuti style status-final-assy
+// =====================================================================
+// PERUBAHAN DARI VERSI SEBELUMNYA:
+//   1. Interface CheckResult: tambah deviceCode?: string | null
+//   2. Interface OKModal: baru (sama struktur dengan status-final-assy)
+//   3. State: const [okModal, setOkModal]
+//   4. Helper: openOkModal(), openNgModal() — dipakai konsisten
+//   5. loadDataFromDB: mapping device_code → deviceCode
+//   6. renderStatusCell: OK clickable → openOkModal
+//   7. renderStatusCellDailyCheckIns: OK clickable → openOkModal
+//   8. renderCSRemoveCellByNoShift: OK clickable → openOkModal
+//   9. Mobile card renderers: OK clickable di semua viewMode
+//  10. Modal UI OKModal: style hijau, grid info, deviceCode row
+//  11. formatTime helper: sama dengan status-final-assy
+// TIDAK DIUBAH: logic checklist, offline/sync/cache, signatures, roles
+// =====================================================================
+
 "use client"
 import { useState, useMemo, useEffect, useCallback, useRef } from "react"
 import { useAuth } from "@/lib/auth-context"
@@ -52,6 +71,7 @@ const PRE_ASSY_SPECIFIC_AREA_ITEMS: Record<string, number[]> = {
 };
 const PRE_ASSY_SPECIFIC_AREA_OPTIONS = ["TENSILE", "CROSS SECTION", "CUTTING", "PA"];
 
+// ─── [PERUBAHAN 1] Tambah deviceCode ke interface CheckResult ──────────────
 interface CheckResult {
   status: "OK" | "NG" | "-"
   ngCount: number
@@ -67,6 +87,17 @@ interface CheckResult {
   gaugeId?: string | null
   dciOtherNote?: string
   dciPhotos?: string[]
+  deviceCode?: string | null   // ← TAMBAHAN: TC21 physical device code
+}
+
+// ─── [PERUBAHAN 2] OKModal interface — sama struktur dengan status-final-assy
+interface OKModal {
+  date: number
+  shift: "A" | "B"
+  itemName: string
+  submittedBy: string
+  submittedAt: string
+  deviceCode: string | null
 }
 
 interface DailyCheckPoint { id: number; checkPoint: string; shift: "A" | "B"; waktuCheck: string; standard: string }
@@ -76,6 +107,21 @@ interface CSRemoveToolItem { id: string; dbId?: number; no: number; toolType: st
 interface PressureJigCheckPoint { id: number; checkPoint: string; shift: "A" | "B"; frequency: string; judge: string }
 
 interface AreaOption { id: number; area_name: string; area_code: string; description?: string; sort_order: number }
+
+// ─── Helper: format waktu — sama dengan status-final-assy ────────────────────
+function formatTime(isoStr: string | undefined | null): string {
+  if (!isoStr) return "-";
+  try {
+    const d = new Date(isoStr);
+    if (isNaN(d.getTime())) return "-";
+    return d.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", hour12: false });
+  } catch { return "-"; }
+}
+
+function formatDateLocal(year: number, month: number, date: number): string {
+  const months = ["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"];
+  return `${date} ${months[month]} ${year}`;
+}
 
 function AreaFilter({ categoryCode, selectedArea, onAreaChange, isLoading = false, defaultAreaCode }: {
   categoryCode: string; selectedArea: string; onAreaChange: (v: string) => void; isLoading?: boolean; defaultAreaCode?: string;
@@ -113,7 +159,7 @@ function AreaFilter({ categoryCode, selectedArea, onAreaChange, isLoading = fals
   );
 }
 
-// DailyCheckIns checkpoints
+// DailyCheckIns checkpoints — tidak diubah
 const DAILY_CHECK_INS_CHECKPOINTS_FULL: DailyCheckInsPoint[] = [
     {id:1,no:1,itemCheck:"BOLPOINT & MARKER",checkPoint:'1A. TERDAPAT STICKER "E"',method:"VISUAL",area:{tensile:true,crossSection:true,cutting:true,pa:true},shift:"A",schedule:"Setiap Hari"},
     {id:1.1,no:1,itemCheck:"BOLPOINT & MARKER",checkPoint:'1A. TERDAPAT STICKER "E"',method:"VISUAL",area:{tensile:true,crossSection:true,cutting:true,pa:true},shift:"B",schedule:"Setiap Hari"},
@@ -283,20 +329,13 @@ export default function PreAssyGLStatusPage() {
   const [activeMonth, setActiveMonth] = useState(() => new Date().getMonth())
   const [activeYear, setActiveYear]   = useState(() => new Date().getFullYear())
   const [selectedWeek, setSelectedWeek] = useState(1)
-  // ✅ FIX Bug 1: Inisialisasi selectedArea langsung dari viewMode awal user
-  // (bukan dari "daily" hardcode) agar nilai sudah benar sejak render pertama.
-  // getDefaultViewMode() dipanggil di useState sehingga nilainya konsisten
-  // dengan viewMode yang pertama kali di-set.
-  const [selectedArea, setSelectedArea] = useState("");
+  const [selectedArea, setSelectedArea] = useState("")
 
   useEffect(() => {
-    if (!user || !viewMode) return; 
-    
-    const defaultArea = DEFAULT_AREA_BY_CATEGORY[VIEW_MODE_CATEGORY_CODE[viewMode]];
-    if (defaultArea && defaultArea !== selectedArea) {
-      setSelectedArea(defaultArea);
-    }
-  }, [user, viewMode]); //
+    if (!user || !viewMode) return
+    const defaultArea = DEFAULT_AREA_BY_CATEGORY[VIEW_MODE_CATEGORY_CODE[viewMode]]
+    if (defaultArea && defaultArea !== selectedArea) setSelectedArea(defaultArea)
+  }, [user, viewMode]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const [selectedSpecificArea, setSelectedSpecificArea] = useState("TENSILE")
 
@@ -304,16 +343,26 @@ export default function PreAssyGLStatusPage() {
   const [glSignaturesGL, setGlSignaturesGL] = useState<Record<string, Record<string, "-" | "☑">>>({})
   const [glSignaturesESO, setGlSignaturesESO] = useState<Record<string, Record<string, "-" | "☑">>>({})
 
-  // ✅ CONVEYOR: menggantikan carlineOptions + selectedCarlineLine
   const [conveyorOptions, setConveyorOptions] = useState<string[]>([])
   const [selectedConveyor, setSelectedConveyor] = useState<string>("")
   const [isFetchingConveyors, setIsFetchingConveyors] = useState(false)
 
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
   const [isMobile, setIsMobile] = useState(false)
   const [expandedDates, setExpandedDates] = useState<Set<number>>(new Set())
+
+  // ─── [PERUBAHAN 3] State okModal ────────────────────────────────────────────
+  const [okModal, setOkModal] = useState<OKModal | null>(null)
+
+  // ─── NG Modal state — tidak diubah ──────────────────────────────────────────
+  const [photoZoomSrc, setPhotoZoomSrc] = useState<string | null>(null)
+  const [ngModal, setNgModal] = useState<{
+    status: "NG"; label: string; date: number; shift: "A"|"B";
+    ngDescription: string; ngDepartment: string; submittedBy: string; submittedAt: string;
+    isDCI?: boolean; dciItemCheck?: string; dciArea?: string; dciConveyor?: string;
+    dciNgChoices?: string[]; dciOtherNote?: string; dciPhotos?: string[]; dciGaugeId?: string|null;
+  } | null>(null)
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth <= 768)
@@ -338,7 +387,6 @@ export default function PreAssyGLStatusPage() {
   [activeYear, activeMonth])
 
   const categoryCode = useMemo(() => VIEW_MODE_CATEGORY_CODE[viewMode], [viewMode])
-
   const TIME_SLOTS = ["01.00","04.00","08.00","13.00","16.00","20.00"]
 
   const getWeeksInMonth = useMemo(() => {
@@ -373,10 +421,7 @@ export default function PreAssyGLStatusPage() {
   const today = new Date().getDate(), currentMonth = new Date().getMonth(), currentYear = new Date().getFullYear()
   const isCurrentMonth = activeMonth === currentMonth && activeYear === currentYear
 
-  const filteredDciNos = useMemo(
-    () => PRE_ASSY_SPECIFIC_AREA_ITEMS[selectedSpecificArea] || [],
-    [selectedSpecificArea]
-  )
+  const filteredDciNos = useMemo(() => PRE_ASSY_SPECIFIC_AREA_ITEMS[selectedSpecificArea] || [], [selectedSpecificArea])
   const filteredDciCheckpoints = useMemo(
     () => DAILY_CHECK_INS_CHECKPOINTS_FULL.filter(c => filteredDciNos.includes(c.no)),
     [filteredDciNos]
@@ -388,83 +433,44 @@ export default function PreAssyGLStatusPage() {
     [filteredDciCheckpoints]
   )
 
-  // ── Fetch conveyor options ───────────────────────────────────────────────────
-  //
-  // ✅ FIX Bug 1: Pisahkan fungsi fetch agar bisa dipanggil ulang secara
-  // imperatif (tidak hanya reaktif via deps). Tambahkan user?.id ke deps
-  // sehingga fetch terjadi ulang saat user selesai ter-load, bukan hanya
-  // saat selectedArea berubah. Ini menyelesaikan race condition dimana
-  // useEffect([selectedArea]) berjalan sebelum user ready.
-  //
-  // ✅ FIX Bug 2: Kirim specificArea ke backend agar hanya conveyor yang
-  // pernah digunakan di specific area tersebut yang dikembalikan.
-  // CONV-9 di TENSILE tidak akan muncul di CUTTING/PA/CROSS SECTION.
   const fetchConveyorOptions = useCallback(async (area: string, specArea: string) => {
-    if (!area) {
-      setConveyorOptions([])
-      setSelectedConveyor("")
-      setResults({})
-      return
-    }
-
+    if (!area) { setConveyorOptions([]); setSelectedConveyor(""); setResults({}); return }
     setIsFetchingConveyors(true)
-
     try {
-      // ✅ FIX Bug 2: Kirim specificArea ke backend hanya untuk Daily Check Ins
-      // Mode lain (GL, CC Stripping, dll) tidak punya specific area
       const specAreaParam = (viewMode === "daily-check-ins" && specArea)
-        ? `&specificArea=${encodeURIComponent(specArea)}`
-        : ""
+        ? `&specificArea=${encodeURIComponent(specArea)}` : ""
       const url = `/api/pre-assy/get-carline-line?areaCode=${encodeURIComponent(area)}${specAreaParam}`
       const res = await fetch(url)
       if (!res.ok) return
       const data = await res.json()
       if (Array.isArray(data)) {
-        const conveyors = [
-          ...new Set(
-            data
-              .map((d: any) => String(d.conveyor || d.carline || "").trim().toUpperCase())
-              .filter(Boolean)
-          )
-        ] as string[]
+        const conveyors = [...new Set(data.map((d: any) => String(d.conveyor || d.carline || "").trim().toUpperCase()).filter(Boolean))] as string[]
         setConveyorOptions(conveyors)
       }
     } catch {}
     finally { setIsFetchingConveyors(false) }
-  // viewMode masuk deps karena menentukan apakah specificArea dikirim atau tidak
   }, [viewMode])
 
   useEffect(() => {
-    setSelectedConveyor("")
-    
-    setResults({})
-    
+    setSelectedConveyor(""); setResults({})
     fetchConveyorOptions(selectedArea, selectedSpecificArea)
   }, [selectedArea, viewMode, selectedSpecificArea, user?.id, fetchConveyorOptions])
 
-  // ── Load data dari DB ─────────────────────────────────────────────
+  // ─── [PERUBAHAN 4] loadDataFromDB: mapping device_code → deviceCode ─────────
+  // Backend mengembalikan field `device_code` per result item.
+  // Kita map ke `deviceCode` agar tersedia di CheckResult interface.
+  // Perubahan ini HANYA di bagian setResults(rData.formatted) — jika backend
+  // sudah mengembalikan device_code di dalam formatted object, mapping dilakukan
+  // di sini dengan normalisasi key.
   const loadDataFromDB = useCallback(async (conveyor: string) => {
     if (!user || !conveyor) return
     setIsLoading(true); setError(null)
     try {
       const monthKey = `${activeYear}-${String(activeMonth+1).padStart(2,"0")}`
       const areaParam = selectedArea ? `&areaCode=${encodeURIComponent(selectedArea)}` : ""
-
-      // ✅ FIX 1: Kirim `conveyor` secara eksplisit — backend get-results (yang sudah
-      //    di-fix) menggunakan param ini untuk filter COALESCE(r.conveyor, r.carline).
-      //    Juga kirim `carline` sebagai backward compat untuk backend lama.
-      //    TIDAK kirim `line` karena akan membuat filter gagal (line="" = falsy).
-      const conveyorParam =
-        `&conveyor=${encodeURIComponent(conveyor)}` +
-        `&carline=${encodeURIComponent(conveyor)}`
-
-      // ✅ FIX 2: Untuk Daily Check Ins, kirim specificArea agar backend memfilter
-      //    data hanya untuk specific area yang sedang dipilih.
-      //    Tanpa ini, semua data semua specific area dikembalikan sekaligus,
-      //    sehingga data TENSILE ikut muncul saat user pilih CUTTING, dsb.
+      const conveyorParam = `&conveyor=${encodeURIComponent(conveyor)}&carline=${encodeURIComponent(conveyor)}`
       const specificAreaParam = (categoryCode === "pre-assy-daily-check-ins" && selectedSpecificArea)
-        ? `&specificArea=${encodeURIComponent(selectedSpecificArea)}`
-        : ""
+        ? `&specificArea=${encodeURIComponent(selectedSpecificArea)}` : ""
 
       const [rRes, sRes] = await Promise.all([
         fetch(`/api/pre-assy/get-results?userId=${user.id}&categoryCode=${categoryCode}&month=${monthKey}${areaParam}${conveyorParam}${specificAreaParam}`),
@@ -472,25 +478,40 @@ export default function PreAssyGLStatusPage() {
       ])
       if (!rRes.ok || !sRes.ok) throw new Error("Gagal memuat data")
       const rData = await rRes.json(), sData = await sRes.json()
-      if (rData.success) setResults(rData.formatted)
+
+      if (rData.success) {
+        // ── Normalisasi: pastikan setiap result item punya field deviceCode
+        // Backend mengembalikan `device_code` (snake_case) atau mungkin sudah
+        // `deviceCode` — kita handle keduanya agar aman
+        const normalized: Record<string, Record<string, CheckResult>> = {}
+        const rawFormatted = rData.formatted || {}
+        for (const dateKey of Object.keys(rawFormatted)) {
+          normalized[dateKey] = {}
+          for (const itemKey of Object.keys(rawFormatted[dateKey])) {
+            const item = rawFormatted[dateKey][itemKey]
+            normalized[dateKey][itemKey] = {
+              ...item,
+              // ← MAPPING device_code → deviceCode
+              // Prioritas: sudah ada deviceCode → pakai; atau ada device_code → pakai; atau null
+              deviceCode: item.deviceCode ?? item.device_code ?? null,
+            }
+          }
+        }
+        setResults(normalized)
+      }
+
       if (sData.success) setGlSignaturesGL(sData.formatted)
     } catch (e) { setError(e instanceof Error ? e.message : "Gagal memuat data") }
     finally { setIsLoading(false) }
-  // ✅ FIX 3: Tambah selectedSpecificArea ke deps agar reload saat ganti specific area
   }, [user, activeMonth, activeYear, categoryCode, selectedArea, selectedSpecificArea])
 
   useEffect(() => {
-    if (!user?.id || !selectedConveyor) {
-      setResults({})
-      return
-    }
+    if (!user?.id || !selectedConveyor) { setResults({}); return }
     loadDataFromDB(selectedConveyor)
-  // ✅ FIX 4: Tambah selectedSpecificArea ke deps useEffect agar trigger reload
   }, [user?.id, activeMonth, activeYear, viewMode, selectedArea, selectedConveyor, selectedSpecificArea, loadDataFromDB])
 
   useEffect(() => { setSelectedWeek(1) }, [activeMonth, activeYear])
 
-  // ── Get results helpers ───────────────────────────────────────────
   const getResult = useCallback((date: number, id: number|string, shift: "A"|"B", timeSlot?: string) => {
     const dateKey = getDateKey(date)
     const key = timeSlot ? `${id}-${shift}-${timeSlot}` : `${id}-${shift}`
@@ -509,15 +530,19 @@ export default function PreAssyGLStatusPage() {
     return signatures[dateKey]?.[shift] || "-"
   }, [glSignaturesGL, glSignaturesESO, getDateKey])
 
-  // ── NG Modal ─────────────────────────────────────────────────────
-  const [photoZoomSrc, setPhotoZoomSrc] = useState<string | null>(null)
-  const [ngModal, setNgModal] = useState<{
-    status: "NG"; label: string; date: number; shift: "A"|"B";
-    ngDescription: string; ngDepartment: string; submittedBy: string; submittedAt: string;
-    isDCI?: boolean; dciItemCheck?: string; dciArea?: string; dciConveyor?: string;
-    dciNgChoices?: string[]; dciOtherNote?: string; dciPhotos?: string[]; dciGaugeId?: string|null;
-  } | null>(null)
+  // ─── [PERUBAHAN 5] openOkModal helper ───────────────────────────────────────
+  const openOkModal = useCallback((date: number, shift: "A"|"B", itemName: string, result: CheckResult) => {
+    setOkModal({
+      date,
+      shift,
+      itemName,
+      submittedBy: result.submittedBy || "-",
+      submittedAt: result.submittedAt || "-",
+      deviceCode:  result.deviceCode  || null,
+    })
+  }, [])
 
+  // ─── [PERUBAHAN 6] renderStatusCell: OK sekarang clickable ──────────────────
   const renderStatusCell = useCallback((date: number, checkpoint: any, timeSlot?: string) => {
     const id = checkpoint.id, shift = checkpoint.shift
     const baseId = Math.floor(id)
@@ -525,29 +550,63 @@ export default function PreAssyGLStatusPage() {
     const itemKey = timeSlot ? `${baseId}-${shift}-${timeSlot}` : `${baseId}-${shift}`
     const status = results[dateKey]?.[itemKey]?.status || "-"
     const result = results[dateKey]?.[itemKey]
-    if (status === "NG") {
-      return <span className="status-badge status-badge-ng"
-        style={{display:"inline-block",width:"100%",backgroundColor:"#f44336",color:"white",padding:"4px 8px",borderRadius:4,fontWeight:500,fontSize:12,textAlign:"center",cursor:"pointer"}}
-        onClick={() => setNgModal({ status:"NG", label: checkpoint.checkPoint||checkpoint.machine||String(id), date, shift, ngDescription: result?.ngDescription||"", ngDepartment: result?.ngDepartment||"", submittedBy: result?.submittedBy||"", submittedAt: result?.submittedAt||"" })}>✗ NG</span>
-    }
-    if (status === "OK") return <span className="status-badge status-badge-ok" style={{display:"inline-block",width:"100%",backgroundColor:"#4caf50",color:"white",padding:"4px 8px",borderRadius:4,fontWeight:500,fontSize:12,textAlign:"center"}}>✓ OK</span>
-    return <span style={{color:"#9e9e9e",fontSize:12}}>-</span>
-  }, [results, getDateKey])
+    const label = checkpoint.checkPoint || checkpoint.machine || String(id)
 
+    if (status === "NG") {
+      return (
+        <span
+          className="status-badge status-badge-ng"
+          style={{display:"inline-block",width:"100%",backgroundColor:"#f44336",color:"white",padding:"4px 8px",borderRadius:4,fontWeight:500,fontSize:12,textAlign:"center",cursor:"pointer",userSelect:"none"}}
+          onClick={() => setNgModal({ status:"NG", label, date, shift, ngDescription: result?.ngDescription||"", ngDepartment: result?.ngDepartment||"", submittedBy: result?.submittedBy||"", submittedAt: result?.submittedAt||"" })}
+        >✗ NG</span>
+      )
+    }
+    if (status === "OK") {
+      return (
+        // ← PERUBAHAN: cursor pointer + onClick → openOkModal
+        <span
+          className="status-badge status-badge-ok"
+          style={{display:"inline-block",width:"100%",backgroundColor:"#4caf50",color:"white",padding:"4px 8px",borderRadius:4,fontWeight:500,fontSize:12,textAlign:"center",cursor:"pointer",userSelect:"none"}}
+          onClick={() => result && openOkModal(date, shift, label, result)}
+          title="Klik untuk lihat detail OK"
+        >✓ OK</span>
+      )
+    }
+    return <span style={{color:"#9e9e9e",fontSize:12}}>-</span>
+  }, [results, getDateKey, openOkModal])
+
+  // ─── [PERUBAHAN 7] renderStatusCellDailyCheckIns: OK clickable ──────────────
   const renderStatusCellDailyCheckIns = useCallback((date: number, itemNo: number, shift: "A"|"B", itemCheck: string) => {
     const result = getInspResult(date, itemNo, shift)
     const status = result?.status || "-"
+
     if (status === "NG") {
       let dciNgChoices: string[] = [], dciOtherNote = "", dciPhotos: string[] = []
       try { const p=JSON.parse(result?.ngDescription||"{}"); if(Array.isArray(p))dciNgChoices=p; else if(p&&typeof p==="object"){dciNgChoices=Array.isArray(p.choices)?p.choices:[];dciOtherNote=p.other||"";} } catch { if(result?.ngDescription)dciNgChoices=[result.ngDescription] }
       try { const pp=JSON.parse(result?.ngPhotos||"[]"); if(Array.isArray(pp))dciPhotos=pp; } catch {}
-      return <span className="status-badge status-badge-ng" style={{display:"inline-block",width:"100%",backgroundColor:"#f44336",color:"white",padding:"4px 8px",borderRadius:4,fontWeight:500,fontSize:12,textAlign:"center",cursor:"pointer"}}
-        onClick={() => setNgModal({status:"NG",label:itemCheck,date,shift,ngDescription:result?.ngDescription||"",ngDepartment:result?.ngDepartment||"",submittedBy:result?.submittedBy||"",submittedAt:result?.submittedAt||"",isDCI:true,dciItemCheck:itemCheck,dciArea:selectedArea,dciConveyor:selectedConveyor,dciNgChoices,dciOtherNote,dciPhotos})}>✗ NG</span>
+      return (
+        <span
+          className="status-badge status-badge-ng"
+          style={{display:"inline-block",width:"100%",backgroundColor:"#f44336",color:"white",padding:"4px 8px",borderRadius:4,fontWeight:500,fontSize:12,textAlign:"center",cursor:"pointer",userSelect:"none"}}
+          onClick={() => setNgModal({status:"NG",label:itemCheck,date,shift,ngDescription:result?.ngDescription||"",ngDepartment:result?.ngDepartment||"",submittedBy:result?.submittedBy||"",submittedAt:result?.submittedAt||"",isDCI:true,dciItemCheck:itemCheck,dciArea:selectedArea,dciConveyor:selectedConveyor,dciNgChoices,dciOtherNote,dciPhotos})}
+        >✗ NG</span>
+      )
     }
-    if (status === "OK") return <span className="status-badge status-badge-ok" style={{display:"inline-block",width:"100%",backgroundColor:"#4caf50",color:"white",padding:"4px 8px",borderRadius:4,fontWeight:500,fontSize:12,textAlign:"center"}}>✓ OK</span>
+    if (status === "OK") {
+      return (
+        // ← PERUBAHAN: cursor pointer + onClick → openOkModal
+        <span
+          className="status-badge status-badge-ok"
+          style={{display:"inline-block",width:"100%",backgroundColor:"#4caf50",color:"white",padding:"4px 8px",borderRadius:4,fontWeight:500,fontSize:12,textAlign:"center",cursor:"pointer",userSelect:"none"}}
+          onClick={() => result && openOkModal(date, shift, itemCheck, result)}
+          title="Klik untuk lihat detail OK"
+        >✓ OK</span>
+      )
+    }
     return <span style={{color:"#9e9e9e"}}>-</span>
-  }, [getInspResult, selectedArea, selectedConveyor])
+  }, [getInspResult, selectedArea, selectedConveyor, openOkModal])
 
+  // ─── [PERUBAHAN 8] renderCSRemoveCellByNoShift: OK clickable ────────────────
   const renderCSRemoveCellByNoShift = useCallback((date: number, no: number, shift: "A"|"B", toolType: string) => {
     const dateKey = getDateKey(date)
     const dateResults = results[dateKey] || {}
@@ -559,7 +618,7 @@ export default function PreAssyGLStatusPage() {
     const ngResults = matchingResults.filter(r => r?.status === "NG")
     if (ngResults.length > 0) {
       const allNgChoices: string[] = []
-      let firstNgResult = ngResults[0]
+      const firstNgResult = ngResults[0]
       ngResults.forEach(r => {
         try {
           const p = JSON.parse(r?.ngDescription || "{}")
@@ -571,20 +630,29 @@ export default function PreAssyGLStatusPage() {
       let crtPhotos: string[] = []
       try { const pp = JSON.parse(firstNgResult?.ngPhotos || "[]"); if (Array.isArray(pp)) crtPhotos = pp } catch {}
       return (
-        <span className="status-badge status-badge-ng"
-          style={{display:"inline-block",width:"100%",backgroundColor:"#f44336",color:"white",padding:"4px 8px",borderRadius:4,fontWeight:500,fontSize:12,textAlign:"center",cursor:"pointer"}}
-          onClick={() => setNgModal({status:"NG",label:toolType,date,shift,ngDescription:firstNgResult?.ngDescription||"",ngDepartment:firstNgResult?.ngDepartment||"",submittedBy:firstNgResult?.submittedBy||"",submittedAt:firstNgResult?.submittedAt||"",isDCI:true,dciItemCheck:toolType,dciArea:firstNgResult?.areaCode||"",dciConveyor:selectedConveyor,dciNgChoices:allNgChoices,dciPhotos:crtPhotos})}>
-          ✗ NG
-        </span>
+        <span
+          className="status-badge status-badge-ng"
+          style={{display:"inline-block",width:"100%",backgroundColor:"#f44336",color:"white",padding:"4px 8px",borderRadius:4,fontWeight:500,fontSize:12,textAlign:"center",cursor:"pointer",userSelect:"none"}}
+          onClick={() => setNgModal({status:"NG",label:toolType,date,shift,ngDescription:firstNgResult?.ngDescription||"",ngDepartment:firstNgResult?.ngDepartment||"",submittedBy:firstNgResult?.submittedBy||"",submittedAt:firstNgResult?.submittedAt||"",isDCI:true,dciItemCheck:toolType,dciArea:firstNgResult?.areaCode||"",dciConveyor:selectedConveyor,dciNgChoices:allNgChoices,dciPhotos:crtPhotos})}
+        >✗ NG</span>
       )
     }
 
-    return <span className="status-badge status-badge-ok" style={{display:"inline-block",width:"100%",backgroundColor:"#4caf50",color:"white",padding:"4px 8px",borderRadius:4,fontWeight:500,fontSize:12,textAlign:"center"}}>✓ OK</span>
-  }, [results, getDateKey, selectedConveyor])
+    // ← PERUBAHAN: OK clickable — gunakan result pertama sebagai representasi
+    const firstOkResult = matchingResults[0]
+    return (
+      <span
+        className="status-badge status-badge-ok"
+        style={{display:"inline-block",width:"100%",backgroundColor:"#4caf50",color:"white",padding:"4px 8px",borderRadius:4,fontWeight:500,fontSize:12,textAlign:"center",cursor:"pointer",userSelect:"none"}}
+        onClick={() => firstOkResult && openOkModal(date, shift, toolType, firstOkResult)}
+        title="Klik untuk lihat detail OK"
+      >✓ OK</span>
+    )
+  }, [results, getDateKey, selectedConveyor, openOkModal])
 
   if (authLoading || !isInitialized || !user) return null
 
-  // ── Checkpoint data ───────────────────────────────────────────────
+  // ── Checkpoint data ─────────────────────────────────────────────────────────
   const DAILY_CHECKPOINTS: DailyCheckPoint[] = [
     { id: 1,   checkPoint: "Inspector check product yang mengalami perubahan 4M dan hasilnya di up date di C/S 4M", standard: "Check pengisian C/S 4M", shift: "A", waktuCheck: "Setiap Hari" },
     { id: 1.1, checkPoint: "Inspector check product yang mengalami perubahan 4M dan hasilnya di up date di C/S 4M", standard: "Check pengisian C/S 4M", shift: "B", waktuCheck: "Setiap Hari" },
@@ -683,7 +751,7 @@ export default function PreAssyGLStatusPage() {
     { id:7.1, checkPoint:"Apakah tekanan dari contact pressure jig masih dalam skala rata-rata.", shift:"B", frequency:"1x /Bulan", judge:"   " },
   ]
 
-  // ── Mobile card renderer ──────────────────────────────────────────
+  // ── Mobile card renderer — [PERUBAHAN 9] OK clickable di semua viewMode ─────
   const renderMobileCards = () => {
     const dayNames = ["Min","Sen","Sel","Rab","Kam","Jum","Sab"]
 
@@ -733,15 +801,21 @@ export default function PreAssyGLStatusPage() {
                               const stB = getResult(day.date, id+0.1, "B", ts)?.status || "-"
                               const rA = getResult(day.date, id, "A", ts)
                               const rB = getResult(day.date, id+0.1, "B", ts)
+                              const label = `${cpA.machine} ${cpA.kind} ${cpA.size}`
                               return (
                                 <div key={ts} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,background:"#f8fafc",borderRadius:6,padding:"4px 6px",border:"1px solid #e2e8f0",minWidth:52}}>
                                   <span style={{fontSize:9,color:"#64748b",fontWeight:700}}>{ts}</span>
                                   <div style={{display:"flex",gap:3}}>
-                                    {([["A",stA,rA],["B",stB,rB]] as [string,string,any][]).map(([sh,st,r]) => (
+                                    {([["A",stA,rA],["B",stB,rB]] as [string,string,CheckResult|null][]).map(([sh,st,r]) => (
                                       <div key={sh} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:1}}>
                                         <span style={{fontSize:8,color:"#94a3b8"}}>{sh}</span>
-                                        <span onClick={st==="NG"&&r?()=>setNgModal({status:"NG",label:`${cpA.machine} ${cpA.kind} ${cpA.size}`,date:day.date,shift:sh as "A"|"B",ngDescription:r?.ngDescription||"",ngDepartment:r?.ngDepartment||"",submittedBy:r?.submittedBy||"",submittedAt:r?.submittedAt||""}):undefined}
-                                          style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:24,height:18,borderRadius:4,fontSize:10,fontWeight:700,color:"white",cursor:st==="NG"?"pointer":"default",background:st==="OK"?"#22c55e":st==="NG"?"#ef4444":"#d1d5db"}}>
+                                        <span
+                                          onClick={
+                                            st==="NG"&&r ? ()=>setNgModal({status:"NG",label,date:day.date,shift:sh as "A"|"B",ngDescription:r?.ngDescription||"",ngDepartment:r?.ngDepartment||"",submittedBy:r?.submittedBy||"",submittedAt:r?.submittedAt||""})
+                                            : st==="OK"&&r ? ()=>openOkModal(day.date, sh as "A"|"B", label, r)
+                                            : undefined
+                                          }
+                                          style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:24,height:18,borderRadius:4,fontSize:10,fontWeight:700,color:"white",cursor:(st==="NG"||st==="OK")?"pointer":"default",background:st==="OK"?"#22c55e":st==="NG"?"#ef4444":"#d1d5db",userSelect:"none"}}>
                                           {st==="OK"?"✓":st==="NG"?"✗":"-"}
                                         </span>
                                       </div>
@@ -766,7 +840,6 @@ export default function PreAssyGLStatusPage() {
     if (viewMode === "daily-check-ins") {
       return (
         <div style={{display:"flex",flexDirection:"column",gap:10}}>
-          {/* Conveyor badge mobile */}
           {selectedConveyor && (
             <div style={{padding:"8px 12px",background:"#fffbeb",border:"1px solid #fcd34d",borderRadius:8,fontSize:12,color:"#92400e",fontWeight:600,display:"flex",alignItems:"center",gap:6}}>
               <span>🏭</span><span>Conveyor: <strong>{selectedConveyor}</strong></span>
@@ -776,12 +849,8 @@ export default function PreAssyGLStatusPage() {
             const dow = new Date(activeYear, activeMonth, date).getDay()
             const dayName = dayNames[dow]
             const isToday = isCurrentMonth && date === today
-            const hasNG = filteredDciNos.some(no =>
-              (["A","B"] as const).some(sh => getInspResult(date, no, sh)?.status === "NG")
-            )
-            const hasData = filteredDciNos.some(no =>
-              (["A","B"] as const).some(sh => { const r = getInspResult(date, no, sh); return r && r.status !== "-"; })
-            )
+            const hasNG = filteredDciNos.some(no => (["A","B"] as const).some(sh => getInspResult(date, no, sh)?.status === "NG"))
+            const hasData = filteredDciNos.some(no => (["A","B"] as const).some(sh => { const r = getInspResult(date, no, sh); return r && r.status !== "-"; }))
             const isExpanded = expandedDates.has(date)
             return (
               <div key={date} style={{border:hasNG?"2px solid #ef4444":isToday?"2px solid #f59e0b":"1px solid #e2e8f0",borderRadius:12,background:isToday?"#fffbeb":hasData?"white":"#f8fafc",overflow:"hidden",opacity:hasData?1:0.7}}>
@@ -824,8 +893,12 @@ export default function PreAssyGLStatusPage() {
                                 <div key={sh} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
                                   <span style={{fontSize:9,color:"#64748b",fontWeight:700}}>{sh}</span>
                                   <span
-                                    onClick={st==="NG"&&r?()=>setNgModal({status:"NG",label:item.itemCheck,date,shift:sh,ngDescription:r.ngDescription||"",ngDepartment:r.ngDepartment||"",submittedBy:r.submittedBy||"",submittedAt:r.submittedAt||"",isDCI:true,dciItemCheck:item.itemCheck,dciArea:selectedArea,dciConveyor:selectedConveyor,dciNgChoices:ngChoices,dciOtherNote,dciPhotos}):undefined}
-                                    style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:36,height:22,borderRadius:5,fontSize:11,fontWeight:700,color:"white",cursor:st==="NG"?"pointer":"default",background:st==="OK"?"#22c55e":st==="NG"?"#ef4444":"#d1d5db"}}>
+                                    onClick={
+                                      st==="NG"&&r ? ()=>setNgModal({status:"NG",label:item.itemCheck,date,shift:sh,ngDescription:r.ngDescription||"",ngDepartment:r.ngDepartment||"",submittedBy:r.submittedBy||"",submittedAt:r.submittedAt||"",isDCI:true,dciItemCheck:item.itemCheck,dciArea:selectedArea,dciConveyor:selectedConveyor,dciNgChoices:ngChoices,dciOtherNote,dciPhotos})
+                                      : st==="OK"&&r ? ()=>openOkModal(date, sh, item.itemCheck, r)
+                                      : undefined
+                                    }
+                                    style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:36,height:22,borderRadius:5,fontSize:11,fontWeight:700,color:"white",cursor:(st==="NG"||st==="OK")?"pointer":"default",background:st==="OK"?"#22c55e":st==="NG"?"#ef4444":"#d1d5db",userSelect:"none"}}>
                                     {st==="OK"?"✓":st==="NG"?"✗":"-"}
                                   </span>
                                 </div>
@@ -886,7 +959,7 @@ export default function PreAssyGLStatusPage() {
 
                       const getAggStatus = (items: CSRemoveToolItem[]) => {
                         const matched = items.map(it => dateResults[it.id]).filter(Boolean)
-                        if (matched.length === 0) return { st: "-", r: null, ngChoices: [] as string[], photos: [] as string[] }
+                        if (matched.length === 0) return { st: "-", r: null as CheckResult|null, ngChoices: [] as string[], photos: [] as string[] }
                         const ngR = matched.find(r => r?.status === "NG")
                         if (ngR) {
                           let ngChoices: string[] = []
@@ -914,8 +987,12 @@ export default function PreAssyGLStatusPage() {
                                 <div key={sh} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
                                   <span style={{fontSize:9,color:"#64748b",fontWeight:700}}>{sh}</span>
                                   <span
-                                    onClick={agg.st==="NG"&&agg.r?()=>setNgModal({status:"NG",label:g.toolType,date,shift:sh,ngDescription:agg.r!.ngDescription||"",ngDepartment:agg.r!.ngDepartment||"",submittedBy:agg.r!.submittedBy||"",submittedAt:agg.r!.submittedAt||"",isDCI:true,dciItemCheck:g.toolType,dciArea:selectedArea,dciConveyor:selectedConveyor,dciNgChoices:agg.ngChoices,dciPhotos:agg.photos}):undefined}
-                                    style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:36,height:22,borderRadius:5,fontSize:11,fontWeight:700,color:"white",cursor:agg.st==="NG"?"pointer":"default",background:agg.st==="OK"?"#22c55e":agg.st==="NG"?"#ef4444":"#d1d5db"}}>
+                                    onClick={
+                                      agg.st==="NG"&&agg.r ? ()=>setNgModal({status:"NG",label:g.toolType,date,shift:sh,ngDescription:agg.r!.ngDescription||"",ngDepartment:agg.r!.ngDepartment||"",submittedBy:agg.r!.submittedBy||"",submittedAt:agg.r!.submittedAt||"",isDCI:true,dciItemCheck:g.toolType,dciArea:selectedArea,dciConveyor:selectedConveyor,dciNgChoices:agg.ngChoices,dciPhotos:agg.photos})
+                                      : agg.st==="OK"&&agg.r ? ()=>openOkModal(date, sh, g.toolType, agg.r!)
+                                      : undefined
+                                    }
+                                    style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:36,height:22,borderRadius:5,fontSize:11,fontWeight:700,color:"white",cursor:(agg.st==="NG"||agg.st==="OK")?"pointer":"default",background:agg.st==="OK"?"#22c55e":agg.st==="NG"?"#ef4444":"#d1d5db",userSelect:"none"}}>
                                     {agg.st==="OK"?"✓":agg.st==="NG"?"✗":"-"}
                                   </span>
                                 </div>
@@ -934,7 +1011,7 @@ export default function PreAssyGLStatusPage() {
       )
     }
 
-    // Pressure Jig & Daily GL
+    // Pressure Jig & Daily GL — [PERUBAHAN 9 lanjutan] OK clickable
     const items = viewMode === "pressure-jig"
       ? Array.from({length:7},(_,i)=>i+1).map(id => {
           const cp = PRESSURE_JIG_CHECKPOINTS.find(c => c.id===id && c.shift==="A")
@@ -987,12 +1064,19 @@ export default function PreAssyGLStatusPage() {
                           {(["A","B"] as const).map(sh => {
                             const r = sh==="A"?rA:rB, st = sh==="A"?stA:stB
                             const cpId = sh==="A"?it.id:it.id+0.1
-                            const cpLabel = viewMode==="pressure-jig" ? PRESSURE_JIG_CHECKPOINTS.find(c=>c.id===cpId)?.checkPoint : DAILY_CHECKPOINTS.find(c=>c.id===cpId)?.checkPoint
+                            const cpLabel = viewMode==="pressure-jig"
+                              ? PRESSURE_JIG_CHECKPOINTS.find(c=>c.id===cpId)?.checkPoint
+                              : DAILY_CHECKPOINTS.find(c=>c.id===cpId)?.checkPoint
                             return (
                               <div key={sh} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
                                 <span style={{fontSize:9,color:"#64748b",fontWeight:700}}>{sh}</span>
-                                <span onClick={st==="NG"&&r?()=>setNgModal({status:"NG",label:cpLabel||it.label,date,shift:sh,ngDescription:r.ngDescription||"",ngDepartment:r.ngDepartment||"",submittedBy:r.submittedBy||"",submittedAt:r.submittedAt||""}):undefined}
-                                  style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:36,height:22,borderRadius:5,fontSize:11,fontWeight:700,color:"white",cursor:st==="NG"?"pointer":"default",background:st==="OK"?"#22c55e":st==="NG"?"#ef4444":"#d1d5db"}}>
+                                <span
+                                  onClick={
+                                    st==="NG"&&r ? ()=>setNgModal({status:"NG",label:cpLabel||it.label,date,shift:sh,ngDescription:r.ngDescription||"",ngDepartment:r.ngDepartment||"",submittedBy:r.submittedBy||"",submittedAt:r.submittedAt||""})
+                                    : st==="OK"&&r ? ()=>openOkModal(date, sh, cpLabel||it.label, r)
+                                    : undefined
+                                  }
+                                  style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:36,height:22,borderRadius:5,fontSize:11,fontWeight:700,color:"white",cursor:(st==="NG"||st==="OK")?"pointer":"default",background:st==="OK"?"#22c55e":st==="NG"?"#ef4444":"#d1d5db",userSelect:"none"}}>
                                   {st==="OK"?"✓":st==="NG"?"✗":"-"}
                                 </span>
                               </div>
@@ -1027,7 +1111,7 @@ export default function PreAssyGLStatusPage() {
     )
   }
 
-  // ── RENDER ────────────────────────────────────────────────────────
+  // ── RENDER ─────────────────────────────────────────────────────────────────
   return (
     <>
       <Sidebar userName={user.fullName || user.username || " "} />
@@ -1043,7 +1127,6 @@ export default function PreAssyGLStatusPage() {
 
         {/* CONTROL PANEL */}
         <div className="ctrl-panel">
-          {/* Row 1 — View mode tabs */}
           <div className="ctrl-tabs">
             {allowedViewModes.map(mode => (
               <button key={mode} className={`ctrl-tab ${viewMode===mode?"ctrl-tab--active":""}`} onClick={() => setViewMode(mode)}>
@@ -1051,20 +1134,15 @@ export default function PreAssyGLStatusPage() {
               </button>
             ))}
           </div>
-
-          {/* Row 2 — Area selector */}
           <div className="ctrl-row">
             <AreaFilter categoryCode={categoryCode} selectedArea={selectedArea} onAreaChange={setSelectedArea} isLoading={isLoading} defaultAreaCode={DEFAULT_AREA_BY_CATEGORY[categoryCode]} />
           </div>
-
-          {/* Row 3 — Specific Area (DCI only) */}
           {viewMode === "daily-check-ins" && (
             <div className="ctrl-row">
               <div className="ctrl-spec-area-wrap">
                 <span className="ctrl-label" style={{color:"#5b21b6"}}>🔍 Spesifik Area</span>
                 <div style={{display:"flex",alignItems:"center",gap:6,flex:1}}>
-                  <select value={selectedSpecificArea} onChange={e => setSelectedSpecificArea(e.target.value)}
-                    className="ctrl-spec-area-select">
+                  <select value={selectedSpecificArea} onChange={e => setSelectedSpecificArea(e.target.value)} className="ctrl-spec-area-select">
                     {PRE_ASSY_SPECIFIC_AREA_OPTIONS.map(a => <option key={a} value={a}>{a}</option>)}
                   </select>
                   <span className="ctrl-badge-count">{filteredDciNos.length} item</span>
@@ -1072,42 +1150,31 @@ export default function PreAssyGLStatusPage() {
               </div>
             </div>
           )}
-
-          {/* Row 4 — ✅ CONVEYOR (menggantikan Carline - Line) */}
           <div className="ctrl-row">
             <div className="ctrl-carline-wrap">
               <span className="ctrl-label">🏭 Conveyor:</span>
               {isFetchingConveyors ? (
-                <span style={{fontSize:12,color:"#94a3b8",fontStyle:"italic",padding:"8px 10px",background:"#f8fafc",borderRadius:8,border:"1.5px solid #e2e8f0",display:"inline-block"}}>
-                  Memuat conveyor...
-                </span>
+                <span style={{fontSize:12,color:"#94a3b8",fontStyle:"italic",padding:"8px 10px",background:"#f8fafc",borderRadius:8,border:"1.5px solid #e2e8f0",display:"inline-block"}}>Memuat conveyor...</span>
               ) : conveyorOptions.length === 0 ? (
-                <span style={{fontSize:12,color:"#94a3b8",fontStyle:"italic",padding:"8px 10px",background:"#f8fafc",borderRadius:8,border:"1.5px solid #e2e8f0",display:"inline-block"}}>
-                  Belum ada data conveyor
-                </span>
+                <span style={{fontSize:12,color:"#94a3b8",fontStyle:"italic",padding:"8px 10px",background:"#f8fafc",borderRadius:8,border:"1.5px solid #e2e8f0",display:"inline-block"}}>Belum ada data conveyor</span>
               ) : (
-                <select
-                  value={selectedConveyor}
-                  onChange={e => setSelectedConveyor(e.target.value)}
-                  disabled={isLoading || isFetchingConveyors}
-                  className="ctrl-carline-select"
-                  style={{
-                    borderColor: selectedConveyor ? "#f59e0b" : "#e2e8f0",
-                    color: selectedConveyor ? "#92400e" : "#64748b",
-                    background: selectedConveyor ? "#fffbeb" : "white",
-                  }}
-                >
+                <select value={selectedConveyor} onChange={e => setSelectedConveyor(e.target.value)} disabled={isLoading || isFetchingConveyors} className="ctrl-carline-select"
+                  style={{ borderColor: selectedConveyor?"#f59e0b":"#e2e8f0", color: selectedConveyor?"#92400e":"#64748b", background: selectedConveyor?"#fffbeb":"white" }}>
                   <option value="">— Pilih Conveyor —</option>
-                  {conveyorOptions.map(cv => (
-                    <option key={cv} value={cv}>{cv}</option>
-                  ))}
+                  {conveyorOptions.map(cv => <option key={cv} value={cv}>{cv}</option>)}
                 </select>
               )}
             </div>
           </div>
         </div>
 
-        {/* Warning belum pilih conveyor */}
+        {/* Info banner — tambahkan hint OK clickable */}
+        <div style={{backgroundColor:"#e3f2fd",border:"1px solid #90caf9",borderRadius:8,padding:"10px 16px",marginBottom:isMobile?8:12,fontSize:isMobile?12:14}}>
+          <strong>📌 Mode View Only:</strong> Klik status{" "}
+          <span style={{color:"#4caf50",fontWeight:"bold"}}>OK</span> atau{" "}
+          <span style={{color:"#f44336",fontWeight:"bold"}}>NG</span> untuk melihat detail termasuk perangkat yang digunakan.
+        </div>
+
         {!selectedConveyor && !isLoading && (
           <div style={{background:"#fffbeb",border:"1px solid #fcd34d",borderLeft:"4px solid #f59e0b",borderRadius:8,padding:"8px 12px",marginBottom:10,fontSize:12,color:"#92400e",fontWeight:600}}>
             ⚠️ Pilih <strong>Conveyor</strong> untuk menampilkan data.
@@ -1121,20 +1188,16 @@ export default function PreAssyGLStatusPage() {
           </div>
         )}
 
-        {/* Info bar DCI */}
         {viewMode === "daily-check-ins" && (
           <div style={{background:"#ede9fe",border:"1px solid #c4b5fd",borderLeft:"4px solid #7c3aed",borderRadius:8,padding:"7px 12px",marginBottom:10,display:"flex",flexWrap:"wrap",gap:6,alignItems:"center"}}>
             <span style={{fontSize:11,fontWeight:700,color:"#5b21b6",background:"#ddd6fe",padding:"2px 8px",borderRadius:20}}>🔍 {selectedSpecificArea}</span>
             <span style={{fontSize:11,fontWeight:700,color:"#166534",background:"#bbf7d0",padding:"2px 8px",borderRadius:20}}>📋 {filteredDciNos.length} item</span>
             {selectedConveyor && (
-              <span style={{fontSize:11,fontWeight:600,color:"#92400e",background:"#fde68a",padding:"2px 8px",borderRadius:20}}>
-                🏭 {selectedConveyor}
-              </span>
+              <span style={{fontSize:11,fontWeight:600,color:"#92400e",background:"#fde68a",padding:"2px 8px",borderRadius:20}}>🏭 {selectedConveyor}</span>
             )}
           </div>
         )}
 
-        {/* MONTH NAVIGATION */}
         {(viewMode==="cc-stripping"||viewMode==="pressure-jig"||viewMode==="daily-check-ins"||viewMode==="cs-remove-tool") && (
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:isMobile?10:15,gap:8}}>
             <button onClick={() => changeMonth(-1)} style={{padding:isMobile?"6px 10px":"8px 16px",backgroundColor:"#1976d2",color:"white",border:"none",borderRadius:6,cursor:"pointer",fontWeight:"bold",fontSize:isMobile?12:14,whiteSpace:"nowrap"}}>
@@ -1187,9 +1250,7 @@ export default function PreAssyGLStatusPage() {
                       <th rowSpan={2}>Shift</th>
                       <th colSpan={dynamicDates.length} className="month-header">{getMonthName(activeMonth)} {activeYear}</th>
                     </tr>
-                    <tr>
-                      {dynamicDates.map(date => <th key={date} className={isCurrentMonth&&date===today?"col-date-today":"col-date-pa"}>{date}</th>)}
-                    </tr>
+                    <tr>{dynamicDates.map(date => <th key={date} className={isCurrentMonth&&date===today?"col-date-today":"col-date-pa"}>{date}</th>)}</tr>
                   </>
                 ) : viewMode === "daily-check-ins" ? (
                   <>
@@ -1202,9 +1263,7 @@ export default function PreAssyGLStatusPage() {
                         {selectedConveyor && <span style={{marginLeft:8,fontSize:11,fontWeight:600,background:"rgba(255,255,255,0.2)",padding:"2px 8px",borderRadius:10}}>🏭 {selectedConveyor}</span>}
                       </th>
                     </tr>
-                    <tr>
-                      {dynamicDates.map(d => <th key={d} className={`col-date ${isCurrentMonth&&d===today?"col-date-today":""}`}>{d}</th>)}
-                    </tr>
+                    <tr>{dynamicDates.map(d => <th key={d} className={`col-date ${isCurrentMonth&&d===today?"col-date-today":""}`}>{d}</th>)}</tr>
                   </>
                 ) : viewMode === "cc-stripping" ? (
                   <>
@@ -1302,19 +1361,11 @@ export default function PreAssyGLStatusPage() {
                       <td rowSpan={2} className="col-no" style={{fontWeight:700,color:"#1e3a8a",verticalAlign:"middle"}}>{item.no}</td>
                       <td rowSpan={2} className="col-item dci-item-cell" style={{verticalAlign:"middle"}}>{item.itemCheck}</td>
                       <td className="col-shift-dci shift-badge-a">A</td>
-                      {dynamicDates.map(d => (
-                        <td key={`dci-${item.no}-A-${d}`} className={`col-date-cell${isCurrentMonth&&d===today?" bg-blue-50":""}`}>
-                          {renderStatusCellDailyCheckIns(d, item.no, "A", item.itemCheck)}
-                        </td>
-                      ))}
+                      {dynamicDates.map(d => <td key={`dci-${item.no}-A-${d}`} className={`col-date-cell${isCurrentMonth&&d===today?" bg-blue-50":""}`}>{renderStatusCellDailyCheckIns(d, item.no, "A", item.itemCheck)}</td>)}
                     </tr>
                     <tr>
                       <td className="col-shift-dci shift-badge-b">B</td>
-                      {dynamicDates.map(d => (
-                        <td key={`dci-${item.no}-B-${d}`} className={`col-date-cell${isCurrentMonth&&d===today?" bg-blue-50":""}`}>
-                          {renderStatusCellDailyCheckIns(d, item.no, "B", item.itemCheck)}
-                        </td>
-                      ))}
+                      {dynamicDates.map(d => <td key={`dci-${item.no}-B-${d}`} className={`col-date-cell${isCurrentMonth&&d===today?" bg-blue-50":""}`}>{renderStatusCellDailyCheckIns(d, item.no, "B", item.itemCheck)}</td>)}
                     </tr>
                   </React.Fragment>
                 ))}
@@ -1348,19 +1399,11 @@ export default function PreAssyGLStatusPage() {
                         <td rowSpan={2} className="col-tool">{group.toolType}</td>
                         <td rowSpan={2} className="col-control">{repItem.controlNo}</td>
                         <td className="col-shift shift-badge-a">A</td>
-                        {dynamicDates.map(d => (
-                          <td key={`crt-${group.no}-A-${d}`} className={`col-date-cell${isCurrentMonth&&d===today?" bg-blue-50":""}`}>
-                            {renderCSRemoveCellByNoShift(d, group.no, "A", group.toolType)}
-                          </td>
-                        ))}
+                        {dynamicDates.map(d => <td key={`crt-${group.no}-A-${d}`} className={`col-date-cell${isCurrentMonth&&d===today?" bg-blue-50":""}`}>{renderCSRemoveCellByNoShift(d, group.no, "A", group.toolType)}</td>)}
                       </tr>
                       <tr>
                         <td className="col-shift shift-badge-b">B</td>
-                        {dynamicDates.map(d => (
-                          <td key={`crt-${group.no}-B-${d}`} className={`col-date-cell${isCurrentMonth&&d===today?" bg-blue-50":""}`}>
-                            {renderCSRemoveCellByNoShift(d, group.no, "B", group.toolType)}
-                          </td>
-                        ))}
+                        {dynamicDates.map(d => <td key={`crt-${group.no}-B-${d}`} className={`col-date-cell${isCurrentMonth&&d===today?" bg-blue-50":""}`}>{renderCSRemoveCellByNoShift(d, group.no, "B", group.toolType)}</td>)}
                       </tr>
                     </React.Fragment>
                   )
@@ -1393,7 +1436,95 @@ export default function PreAssyGLStatusPage() {
         )}
       </div>
 
-      {/* NG MODAL */}
+      {/* ─── [PERUBAHAN 10] OK DETAIL MODAL — style sama dengan status-final-assy ── */}
+      {okModal && (
+        <div
+          style={{position:"fixed",top:0,left:0,width:"100%",height:"100%",backgroundColor:"rgba(0,0,0,0.55)",display:"flex",justifyContent:"center",alignItems:"center",zIndex:9999,padding:16}}
+          onClick={() => setOkModal(null)}
+        >
+          <div
+            style={{backgroundColor:"white",borderRadius:14,maxWidth:460,width:"100%",boxShadow:"0 20px 60px rgba(0,0,0,0.3)",overflow:"hidden"}}
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Header hijau */}
+            <div style={{background:"linear-gradient(135deg,#22c55e,#15803d)",padding:"18px 22px",display:"flex",alignItems:"center",gap:14}}>
+              <div style={{background:"rgba(255,255,255,0.2)",border:"2px solid rgba(255,255,255,0.4)",color:"white",fontSize:12,fontWeight:800,padding:"3px 12px",borderRadius:20}}>✓ OK</div>
+              <div style={{flex:1}}>
+                <p style={{margin:0,fontSize:16,fontWeight:800,color:"white"}}>{okModal.itemName}</p>
+                <p style={{margin:0,fontSize:11,color:"rgba(255,255,255,0.8)"}}>
+                  {formatDateLocal(activeYear, activeMonth, okModal.date)} · Shift {okModal.shift}
+                  {selectedConveyor && <span style={{marginLeft:6}}>· 🏭 {selectedConveyor}</span>}
+                </p>
+              </div>
+              <button
+                onClick={() => setOkModal(null)}
+                style={{background:"rgba(255,255,255,0.2)",border:"none",color:"white",width:32,height:32,borderRadius:8,cursor:"pointer",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}
+              >✕</button>
+            </div>
+
+            {/* Body */}
+            <div style={{padding:"20px 22px",display:"flex",flexDirection:"column",gap:14}}>
+              {/* Status badge */}
+              <div style={{display:"flex",alignItems:"center",gap:14,padding:"16px 18px",background:"#f0fdf4",border:"1.5px solid #86efac",borderRadius:12}}>
+                <div style={{width:48,height:48,borderRadius:"50%",background:"#22c55e",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                  <span style={{color:"white",fontSize:24,fontWeight:800}}>✓</span>
+                </div>
+                <div>
+                  <p style={{margin:0,fontSize:13,fontWeight:700,color:"#15803d"}}>Kondisi Normal — OK</p>
+                  <p style={{margin:"2px 0 0",fontSize:12,color:"#166534"}}>Item ini telah diperiksa dan dinyatakan baik</p>
+                </div>
+              </div>
+
+              {/* Info grid */}
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                <div style={{background:"#eff6ff",border:"1.5px solid #bfdbfe",borderRadius:10,padding:"12px 14px"}}>
+                  <p style={{margin:0,fontSize:11,fontWeight:700,color:"#1e40af",textTransform:"uppercase",letterSpacing:"0.05em"}}>🕐 Jam Check</p>
+                  <p style={{margin:"4px 0 0",fontSize:20,fontWeight:800,color:"#1e3a8a",fontVariantNumeric:"tabular-nums"}}>{formatTime(okModal.submittedAt)}</p>
+                </div>
+                <div style={{background:"#f5f3ff",border:"1.5px solid #ddd6fe",borderRadius:10,padding:"12px 14px"}}>
+                  <p style={{margin:0,fontSize:11,fontWeight:700,color:"#5b21b6",textTransform:"uppercase",letterSpacing:"0.05em"}}>⚡ Shift</p>
+                  <p style={{margin:"4px 0 0",fontSize:20,fontWeight:800,color:"#4c1d95"}}>Shift {okModal.shift}</p>
+                </div>
+                <div style={{background:"#fff7ed",border:"1.5px solid #fed7aa",borderRadius:10,padding:"12px 14px"}}>
+                  <p style={{margin:0,fontSize:11,fontWeight:700,color:"#92400e",textTransform:"uppercase",letterSpacing:"0.05em"}}>📅 Tanggal</p>
+                  <p style={{margin:"4px 0 0",fontSize:13,fontWeight:700,color:"#78350f"}}>{formatDateLocal(activeYear, activeMonth, okModal.date)}</p>
+                </div>
+                <div style={{background:"#f0fdf4",border:"1.5px solid #bbf7d0",borderRadius:10,padding:"12px 14px"}}>
+                  <p style={{margin:0,fontSize:11,fontWeight:700,color:"#166534",textTransform:"uppercase",letterSpacing:"0.05em"}}>👤 Dicek Oleh</p>
+                  <p style={{margin:"4px 0 0",fontSize:13,fontWeight:700,color:"#14532d",wordBreak:"break-word"}}>{okModal.submittedBy || "-"}</p>
+                </div>
+              </div>
+
+              {/* Device Code row — sama dengan status-final-assy */}
+              {okModal.deviceCode && (
+                <div style={{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",background:"#f8fafc",border:"1.5px solid #e2e8f0",borderRadius:10}}>
+                  <span style={{fontSize:18}}>📱</span>
+                  <div style={{flex:1}}>
+                    <p style={{margin:0,fontSize:11,fontWeight:700,color:"#475569",textTransform:"uppercase",letterSpacing:"0.05em"}}>Device Code</p>
+                    <p style={{margin:"3px 0 0",fontSize:14,fontWeight:800,color:"#1e293b",fontFamily:"monospace",letterSpacing:"0.05em"}}>{okModal.deviceCode}</p>
+                  </div>
+                  <span style={{fontSize:10,fontWeight:700,background:"#e2e8f0",color:"#475569",padding:"2px 8px",borderRadius:20,whiteSpace:"nowrap"}}>TC21</span>
+                </div>
+              )}
+
+              {okModal.submittedAt && okModal.submittedAt !== "-" && (
+                <div style={{display:"flex",justifyContent:"center",fontSize:11,color:"#94a3b8",background:"#f8fafc",borderRadius:8,padding:"8px 12px"}}>
+                  <span>Disimpan pada: <strong style={{color:"#475569"}}>{new Date(okModal.submittedAt).toLocaleString("id-ID")}</strong></span>
+                </div>
+              )}
+            </div>
+
+            <div style={{padding:"12px 22px",borderTop:"1px solid #e2e8f0"}}>
+              <button
+                onClick={() => setOkModal(null)}
+                style={{width:"100%",padding:12,backgroundColor:"#22c55e",color:"white",border:"none",borderRadius:8,fontSize:14,fontWeight:600,cursor:"pointer"}}
+              >Tutup</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* NG MODAL — tidak diubah, tetap persis seperti sebelumnya */}
       {ngModal && (
         <div className="ng-modal-overlay" onClick={() => setNgModal(null)}>
           <div className={`ng-modal${ngModal.isDCI?" ng-modal--dci":""}`} onClick={e => e.stopPropagation()}>
@@ -1411,11 +1542,7 @@ export default function PreAssyGLStatusPage() {
                   <div className="dci-modal-info-row"><span className="dci-modal-info-label">Item Check</span><span className="dci-modal-info-value dci-modal-item-name">{ngModal.dciItemCheck||ngModal.label}{ngModal.dciGaugeId&&<span className="dci-modal-gauge-badge">{ngModal.dciGaugeId}</span>}</span></div>
                   <div className="dci-modal-info-row"><span className="dci-modal-info-label">Tanggal &amp; Shift</span><span className="dci-modal-info-value">{ngModal.date} {getMonthName(activeMonth)} {activeYear}<span className="dci-modal-shift-badge">Shift {ngModal.shift}</span></span></div>
                   <div className="dci-modal-info-row"><span className="dci-modal-info-label">Area</span><span className="dci-modal-info-value dci-modal-area">{ngModal.dciArea||"-"}</span></div>
-                  {/* ✅ Tampilkan Conveyor (bukan Carline - Line) */}
-                  <div className="dci-modal-info-row">
-                    <span className="dci-modal-info-label">Conveyor</span>
-                    <span className="dci-modal-info-value dci-modal-carline">{ngModal.dciConveyor||"-"}</span>
-                  </div>
+                  <div className="dci-modal-info-row"><span className="dci-modal-info-label">Conveyor</span><span className="dci-modal-info-value dci-modal-carline">{ngModal.dciConveyor||"-"}</span></div>
                 </div>
                 <div className="dci-modal-ng-section">
                   <div className="dci-modal-ng-section-header">
@@ -1506,7 +1633,7 @@ export default function PreAssyGLStatusPage() {
         .col-date-today { background:#fef3c7 !important; color:#b45309 !important; font-weight:800 !important; }
         .col-date-cell { min-width:34px; height:34px; padding:2px 1px; }
         .status-badge { display:inline-block; width:100%; padding:3px 4px; border-radius:4px; font-weight:600; font-size:11px; text-align:center; user-select:none; }
-        .status-badge-ok { background:#22c55e; color:white; }
+        .status-badge-ok { background:#22c55e; color:white; cursor:pointer; }
         .status-badge-ng { background:#ef4444; color:white; cursor:pointer; }
         .bg-gray-200 { background-color:#e0e0e0 !important; } .bg-gray-100 { background-color:#f5f5f5 !important; } .bg-blue-50 { background-color:#eff6ff !important; }
         .dci-item-cell { font-weight:700; color:#1e293b; font-size:13px; line-height:1.3; }

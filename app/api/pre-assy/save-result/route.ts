@@ -1,4 +1,13 @@
 // app/api/pre-assy/save-result/route.ts
+// UPDATED: Tambah device_code support
+// PERUBAHAN DARI VERSI SEBELUMNYA:
+//   1. Destructure deviceCode dari body
+//   2. Normalize deviceCode → normalizedDeviceCode
+//   3. Log deviceCode di console log
+//   4. UPDATE query: tambah device_code = $8 (setelah conveyor)
+//   5. INSERT query: tambah kolom device_code + value $17 + DO UPDATE device_code
+// TIDAK DIUBAH: semua logic lain, conveyor, specificArea, duplicate check, dll.
+
 import { NextRequest, NextResponse } from 'next/server';
 import pool from '@/lib/db';
 
@@ -17,7 +26,8 @@ export async function POST(request: NextRequest) {
       areaCode:     body.areaCode,
       carline:      body.carline,
       line:         body.line,
-      conveyor:     body.conveyor,   // ✅ FIX: log conveyor juga
+      conveyor:     body.conveyor,
+      deviceCode:   body.deviceCode,   // ← [PERUBAHAN 1] log deviceCode
     }));
 
     const {
@@ -35,8 +45,8 @@ export async function POST(request: NextRequest) {
       carline,
       line,
       specificArea,
-      // ✅ FIX: terima field conveyor dari frontend (untuk DCI mode)
       conveyor,
+      deviceCode,   // ← [PERUBAHAN 2] destructure deviceCode dari body
     } = body;
 
     if (!userId || !categoryCode || itemId === undefined || !dateKey || !shift || !status) {
@@ -98,20 +108,21 @@ export async function POST(request: NextRequest) {
     const ngDescVal           = ngDescription?.trim() || null;
     const ngDeptVal           = ngDepartment?.trim()  || null;
 
-    // ✅ FIX: Normalize conveyor
-    // Untuk pre-assy-daily-check-ins, frontend mengirim selectedConveyor
-    // sebagai field `carline` (backward compat) DAN field `conveyor`.
-    // Kita simpan ke KEDUA kolom agar:
-    //   - checklist_results.conveyor → dibaca oleh get-carline-line (mode baru)
-    //   - checklist_results.carline  → dibaca oleh get-carline-line (mode lama/fallback)
-    // Dengan demikian dropdown conveyor selalu terisi setelah checklist disimpan.
+    // Normalize conveyor
     const normalizedConveyor = (typeof conveyor === 'string' && conveyor.trim())
       ? conveyor.trim()
-      : (normalizedCarline || null);  // fallback: gunakan carline jika conveyor tidak dikirim
+      : (normalizedCarline || null);
+
+    // ← [PERUBAHAN 3] Normalize deviceCode
+    // Terima dari frontend sebagai camelCase (deviceCode),
+    // simpan ke DB sebagai snake_case (device_code).
+    // null jika tidak dikirim atau kosong.
+    const normalizedDeviceCode = (typeof deviceCode === 'string' && deviceCode.trim())
+      ? deviceCode.trim()
+      : null;
 
     // 6. Handle DELETE
     if (status === '-') {
-      // ✅ FIX: DELETE juga cek kolom conveyor agar tidak ada orphan row
       await client.query(
         `DELETE FROM checklist_results
          WHERE user_id     = $1
@@ -131,7 +142,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true, deleted: true });
     }
 
-    // 7. VALIDASI DUPLIKAT GAUGE — ATURAN GLOBAL
+    // 7. VALIDASI DUPLIKAT GAUGE — ATURAN GLOBAL (tidak diubah)
     if (categoryCode === 'pre-assy-daily-check-ins' && normalizedTimeSlot !== '') {
       const dupRes = await client.query(
         `SELECT
@@ -167,7 +178,6 @@ export async function POST(request: NextRequest) {
           const parts: string[] = [];
           if (row.area_name)  parts.push(row.area_name);
           if (row.specific_area) parts.push(row.specific_area);
-          // ✅ FIX: tampilkan conveyor jika ada, fallback ke carline
           const conveyorLabel = row.conveyor || row.carline;
           if (conveyorLabel)  parts.push(conveyorLabel);
           return {
@@ -205,7 +215,8 @@ export async function POST(request: NextRequest) {
     );
 
     if ((existingRow.rowCount ?? 0) > 0) {
-      // UPDATE — termasuk update conveyor ke nilai terbaru
+      // ← [PERUBAHAN 4] UPDATE: tambah device_code = $8
+      // Parameter bergeser: conveyor=$6, device_code=$7, id=$8
       await client.query(
         `UPDATE checklist_results SET
           status         = $1,
@@ -214,34 +225,28 @@ export async function POST(request: NextRequest) {
           ng_photos      = $4,
           time_slot      = $5,
           conveyor       = $6,
+          device_code    = $7,
           updated_at     = NOW()
-         WHERE id = $7`,
+         WHERE id = $8`,
         [status, ngDescVal, ngDeptVal, ngPhotosVal, normalizedTimeSlot,
-         normalizedConveyor, existingRow.rows[0].id]
+         normalizedConveyor, normalizedDeviceCode, existingRow.rows[0].id]
       );
       console.log(
         `✅ [Pre-Assy] UPDATE id=${existingRow.rows[0].id} ` +
-        `item=${actualItemId} shift=${shift} conveyor="${normalizedConveyor}"`
+        `item=${actualItemId} shift=${shift} conveyor="${normalizedConveyor}" device_code="${normalizedDeviceCode}"`
       );
     } else {
-      // ✅ FIX: INSERT menyertakan kolom `conveyor` agar terbaca oleh get-carline-line
-      // Tabel checklist_results memiliki kolom `conveyor` (text, nullable).
-      // Unique index v1: (user_id, category_id, item_id, date_key, shift,
-      //                   COALESCE(time_slot,''), COALESCE(area_id,-1),
-      //                   COALESCE(carline,''),   COALESCE(line,''),
-      //                   COALESCE(specific_area,''))
-      // Unique index v2: (user_id, category_id, item_id, date_key, shift,
-      //                   COALESCE(time_slot,''), COALESCE(area_id,-1),
-      //                   COALESCE(conveyor,''),  COALESCE(specific_area,''))
-      // ON CONFLICT menggunakan index v1 (legacy, lebih lengkap).
+      // ← [PERUBAHAN 5] INSERT: tambah kolom device_code + value $17 + DO UPDATE device_code
       await client.query(
         `INSERT INTO checklist_results (
           user_id, nik, category_id, item_id, date_key, shift,
           time_slot, status, ng_description, ng_department, ng_photos,
           area_id, carline, line, conveyor, specific_area,
+          device_code,
           submitted_at, created_at, updated_at
         ) VALUES (
           $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
+          $17,
           NOW(),NOW(),NOW()
         )
         ON CONFLICT (
@@ -267,16 +272,18 @@ export async function POST(request: NextRequest) {
           line           = EXCLUDED.line,
           conveyor       = EXCLUDED.conveyor,
           specific_area  = EXCLUDED.specific_area,
+          device_code    = EXCLUDED.device_code,
           updated_at     = NOW()`,
         [
           userId, nik, categoryId, actualItemId, dateKey, shift,
           normalizedTimeSlot, status, ngDescVal, ngDeptVal, ngPhotosVal,
           areaId, normalizedCarline, normalizedLine, normalizedConveyor, specificAreaVal,
+          normalizedDeviceCode,   // ← $17
         ]
       );
       console.log(
         `✅ [Pre-Assy] INSERT item=${actualItemId} (${categoryCode}) ` +
-        `area_id=${areaId} conveyor="${normalizedConveyor}"`
+        `area_id=${areaId} conveyor="${normalizedConveyor}" device_code="${normalizedDeviceCode}"`
       );
     }
 

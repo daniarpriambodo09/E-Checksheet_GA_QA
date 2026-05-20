@@ -32,6 +32,8 @@ export async function GET(request: NextRequest) {
     const areaCode = searchParams.get('areaCode');
     const carline = searchParams.get('carline');
     const line = searchParams.get('line');
+    const conveyor = searchParams.get('conveyor');
+    const pattern = searchParams.get('pattern');
 
     if (!userId || !categoryCode || !month) {
       return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
@@ -100,6 +102,11 @@ export async function GET(request: NextRequest) {
         queryParams.push(line);
       }
 
+      if (conveyor) {
+        whereConditions.push(`(COALESCE(s.carline, '') = $${++paramCount})`);
+        queryParams.push(conveyor);
+      }
+
       query = `
         SELECT s.date_key, s.shift, s.signature_status, s.area_id
         FROM checklist_signatures s
@@ -129,6 +136,11 @@ export async function GET(request: NextRequest) {
       if (line) {
         whereConditions.push(`s.line = $${++paramCount}`);
         queryParams.push(line);
+      }
+
+      if (conveyor) {
+        whereConditions.push(`(COALESCE(s.carline, '') = $${++paramCount})`);
+        queryParams.push(conveyor);
       }
 
       query = `

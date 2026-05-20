@@ -1,22 +1,10 @@
 // app/api/pre-assy/get-results/route.ts
-//
-// ✅ PERBAIKAN BUG: Data checklist tidak terpisah berdasarkan Conveyor
-//
-// ROOT CAUSE:
-//   Kode lama (baris 385 original):
-//     if (carline && line) { ... filter carline AND line ... }
-//   → Kondisi GAGAL karena frontend mengirim line="" (string kosong = falsy)
-//   → (carline && line) = ("CONV-1" && "") = false
-//   → Filter conveyor tidak pernah berjalan
-//   → Semua data semua conveyor dikembalikan tanpa filter
-//
-// FIX:
-//   1. Terima param `conveyor` secara eksplisit (prioritas utama)
-//   2. Fallback ke `carline` jika `conveyor` tidak ada
-//   3. Filter dengan COALESCE(r.conveyor, r.carline) = value
-//      TANPA mensyaratkan `line` harus ada
-//   4. Jika tidak ada conveyor sama sekali → return empty (cegah data leak)
-//
+// UPDATED: Tambah device_code support
+// PERUBAHAN DARI VERSI SEBELUMNYA:
+//   1. SELECT query: tambah r.device_code
+//   2. formatted object: tambah deviceCode: row.device_code || null
+// TIDAK DIUBAH: semua logic lain, filter conveyor, specificArea, CC Stripping, dll.
+
 import { NextRequest, NextResponse } from 'next/server';
 import pool from '@/lib/db';
 
@@ -69,9 +57,7 @@ export async function GET(request: NextRequest) {
     const month        = searchParams.get('month');
     const areaCode     = searchParams.get('areaCode');
     const carline      = searchParams.get('carline');
-    // line sengaja tidak dipakai untuk filter — selalu kosong dari frontend conveyor mode
     const timeSlot     = searchParams.get('timeSlot');
-    // ✅ FIX: Terima parameter `conveyor` secara eksplisit sebagai prioritas utama
     const conveyor     = searchParams.get('conveyor');
     const specificArea = searchParams.get('specificArea');
 
@@ -112,19 +98,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // ── ✅ FIX UTAMA: Filter conveyor ─────────────────────────────────
-    //
-    // LOGIKA BARU:
-    //   conveyorValue = conveyor param (prioritas) ATAU carline param (fallback)
-    //
-    // Dengan ini frontend cukup kirim salah satu:
-    //   ?conveyor=CONV-1          → langsung digunakan
-    //   ?carline=CONV-1           → digunakan sebagai fallback
-    //   ?carline=CONV-1&line=     → line kosong diabaikan, carline tetap digunakan
-    //
-    // Filter SQL menggunakan COALESCE agar data lama (hanya kolom carline)
-    // dan data baru (kolom conveyor) keduanya bisa difilter dengan benar.
-    //
+    // ── Filter conveyor ───────────────────────────────────────────────
     const conveyorValue =
       (conveyor && conveyor.trim()) ? conveyor.trim() :
       (carline  && carline.trim())  ? carline.trim()  :
@@ -140,7 +114,6 @@ export async function GET(request: NextRequest) {
         `category=${categoryCode} area=${areaCode ?? 'ALL'}`
       );
     } else {
-      // ✅ Tidak ada conveyor → return kosong (cegah data leakage)
       console.warn(`⚠️ [Pre-Assy Get Results] No conveyor param — returning empty`);
       return NextResponse.json({
         success: true, formatted: {}, count: 0,
@@ -164,12 +137,14 @@ export async function GET(request: NextRequest) {
 
     const whereClause = conditions.join(' AND ');
 
+    // ← [PERUBAHAN 1] Tambah r.device_code di SELECT
     const resultsQuery = await pool.query(
       `SELECT
          r.date_key, r.item_id, r.shift, r.status,
          r.ng_description, r.ng_department, r.ng_photos,
          r.submitted_at, r.time_slot, r.area_id,
          r.carline, r.line, r.specific_area, r.conveyor,
+         r.device_code,
          COALESCE(u.full_name, u.username, 'System') AS submitted_by_name
        FROM checklist_results r
        LEFT JOIN users u ON r.user_id = u.id
@@ -194,7 +169,6 @@ export async function GET(request: NextRequest) {
         itemKey = frontendId ?? `${row.item_id}-${row.shift}`;
 
       } else if (isDailyCheckIns) {
-        // Key format: "${item_id}-${specific_area}-${shift}"
         const rowSpecArea = row.specific_area || 'TENSILE';
         itemKey = `${row.item_id}-${rowSpecArea}-${row.shift}`;
 
@@ -209,6 +183,7 @@ export async function GET(request: NextRequest) {
           : `${row.item_id}-${row.shift}`;
       }
 
+      // ← [PERUBAHAN 2] Tambah deviceCode: row.device_code || null
       formatted[row.date_key][itemKey] = {
         status:        row.status,
         ngCount:       row.status === 'NG' ? 1 : 0,
@@ -224,6 +199,7 @@ export async function GET(request: NextRequest) {
         carline:       row.carline || '',
         line:          row.line    || '',
         specificArea:  row.specific_area || null,
+        deviceCode:    row.device_code   || null,   // ← TAMBAHAN
       };
     });
 
@@ -248,4 +224,3 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Server error' }, { status: 500 });
   }
 }
-

@@ -66,11 +66,16 @@ export const Sidebar = memo(function Sidebar({ userName = "User", userRole = "Ro
     return () => window.removeEventListener("resize", checkIfMobile);
   }, []); // ✅ deps kosong — tidak trigger saat parent re-render
 
-  // ✅ SIMPAN STATE SIDEBAR KE LOCALSTORAGE
+  // ✅ SIMPAN STATE SIDEBAR KE LOCALSTORAGE + DISPATCH EVENT
+  // CustomEvent "sidebar-toggle" dipakai oleh halaman lain untuk
+  // sync margin-left konten secara real-time tanpa polling.
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      localStorage.setItem("sidebar-expanded", String(isExpanded));
-    }
+    if (typeof window === "undefined") return;
+    localStorage.setItem("sidebar-expanded", String(isExpanded));
+    // Dispatch event agar consumer (home, status, dll) langsung tahu
+    window.dispatchEvent(new CustomEvent("sidebar-toggle", {
+      detail: { expanded: isExpanded, isMobile: window.innerWidth <= 768 }
+    }));
   }, [isExpanded]);
 
   // ✅ Fetch NG reports — deps hanya currentRole (primitif string, stabil)
@@ -127,6 +132,137 @@ export const Sidebar = memo(function Sidebar({ userName = "User", userRole = "Ro
     }
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isNotificationOpen, isMobile]);
+
+  type MenuItem = {
+    label: string;
+    href: string;
+    icon: React.ReactNode;
+  };
+
+  const menuByRole: Record<string, MenuItem[]> = {
+    admin: [
+      {
+        label: "Checking Process",
+        href: "/home",
+        icon: (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+            <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+            <polyline points="9 22 9 12 15 12 15 22" />
+          </svg>
+        ),
+      },
+      {
+        label: "QR Generator",
+        href: "/admin/qr-generator",
+        icon: (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+            <rect x="3" y="3" width="5" height="5" />
+            <rect x="16" y="3" width="5" height="5" />
+            <rect x="3" y="16" width="5" height="5" />
+            <path d="M16 16h2v2h-2zM20 16h1v5h-5v-1" />
+          </svg>
+        ),
+      },
+      {
+        label: "Device ID Register",
+        href: "/admin/devices",
+        icon: (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+            <rect x="5" y="2" width="14" height="20" rx="2" />
+            <line x1="12" y1="18" x2="12.01" y2="18" />
+          </svg>
+        ),
+      },
+      {
+        label: "Status Final Assy",
+        href: "/status-final-assy",
+        icon: (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+        ),
+      },
+      {
+        label: "Status Pre Assy",
+        href: "/status-pre-assy",
+        icon: (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+            <path d="M9 12l2 2 4-4" />
+            <path d="M12 3v4" />
+            <rect x="5" y="7" width="14" height="14" rx="2" />
+          </svg>
+        ),
+      },
+    ],
+
+    "inspector-qa": [
+      {
+        label: "Checking Process",
+        href: "/home",
+        icon: (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+            <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+            <polyline points="9 22 9 12 15 12 15 22" />
+          </svg>
+        ),
+      },
+      {
+        label: "Status Pre-Assy",
+        href: "/status-pre-assy",
+        icon: (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+            <path d="M9 12l2 2 4-4" />
+            <path d="M12 3v4" />
+            <rect x="5" y="7" width="14" height="14" rx="2" />
+          </svg>
+        ),
+      },
+      {
+        label: "Status Final-Assy",
+        href: "/status-final-assy",
+        icon: (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+        ),
+      },
+    ],
+
+    "group-leader-qa": [
+      {
+        label: "Checking Process",
+        href: "/home",
+        icon: (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+            <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+            <polyline points="9 22 9 12 15 12 15 22" />
+          </svg>
+        ),
+      },
+      {
+        label: "Status Pre-Assy",
+        href: "/status-pre-assy",
+        icon: (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+            <path d="M9 12l2 2 4-4" />
+            <path d="M12 3v4" />
+            <rect x="5" y="7" width="14" height="14" rx="2" />
+          </svg>
+        ),
+      },
+      {
+        label: "Status Final-Assy",
+        href: "/status-final-assy",
+        icon: (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+        ),
+      },
+    ],
+  };
+
+  const sidebarMenus = menuByRole[currentRole] || [];
 
   // ✅ Logout: gunakan window.location, bukan router.push
   const handleLogout = () => {
@@ -197,80 +333,26 @@ export const Sidebar = memo(function Sidebar({ userName = "User", userRole = "Ro
         {/* Body */}
         <div className="sidebar-body">
           <nav className="sidebar-navigation">
-            {/* ✅ Link pakai href biasa — Next.js Link tidak subscribe ke router context */}
-            <Link
-              href="/home"
-              className={`menu-item ${currentPath === "/home" ? "active" : ""}`}
-              onClick={() => { if (isMobile) setIsExpanded(false); }}
-            >
-              <span className="menu-icon">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
-                  <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                  <polyline points="9 22 9 12 15 12 15 22" />
-                </svg>
-              </span>
-              {isExpanded && <span className="menu-label">Home</span>}
-            </Link>
+            {sidebarMenus.map((menu) => (
+              <Link
+                key={menu.href}
+                href={menu.href}
+                className={`menu-item ${currentPath === menu.href ? "active" : ""}`}
+                onClick={() => {
+                  if (isMobile) setIsExpanded(false);
+                }}
+              >
+                <span className="menu-icon">
+                  {menu.icon}
+                </span>
 
-            {/* STATUS PRE-ASSY */}
-            <Link
-              href="/status-pre-assy"
-              className={`menu-item ${currentPath === "/status-pre-assy" ? "active" : ""}`}
-              onClick={() => { if (isMobile) setIsExpanded(false); }}
-            >
-              <span className="menu-icon">
-                {/* Clipboard Check Icon */}
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
-                  <path d="M9 12l2 2 4-4" />
-                  <path d="M12 3v4" />
-                  <rect x="5" y="7" width="14" height="14" rx="2" />
-                </svg>
-              </span>
-              {isExpanded && <span className="menu-label">Status Pre-Assy</span>}
-            </Link>
-
-            {/* STATUS FINAL-ASSY */}
-            <Link
-              href="/status-final-assy"
-              className={`menu-item ${currentPath === "/status-final-assy" ? "active" : ""}`}
-              onClick={() => { if (isMobile) setIsExpanded(false); }}
-            >
-              <span className="menu-icon">
-                {/* Gear / Process Icon */}
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
-                  <circle cx="12" cy="12" r="3" />
-                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06
-                          a2 2 0 1 1-2.83 2.83l-.06-.06
-                          A1.65 1.65 0 0 0 15 19.4
-                          a1.65 1.65 0 0 0-1 .6
-                          a1.65 1.65 0 0 0-.33 1.82l.06.06
-                          a2 2 0 1 1-2.83 2.83l-.06-.06
-                          A1.65 1.65 0 0 0 9 19.4
-                          a1.65 1.65 0 0 0-1-.6
-                          a1.65 1.65 0 0 0-1.82.33l-.06.06
-                          a2 2 0 1 1-2.83-2.83l.06-.06
-                          A1.65 1.65 0 0 0 4.6 15
-                          a1.65 1.65 0 0 0-.6-1
-                          a1.65 1.65 0 0 0-1.82-.33l-.06.06
-                          a2 2 0 1 1-2.83-2.83l.06-.06
-                          A1.65 1.65 0 0 0 4.6 9
-                          a1.65 1.65 0 0 0 .6-1
-                          a1.65 1.65 0 0 0-.33-1.82l-.06-.06
-                          a2 2 0 1 1 2.83-2.83l.06.06
-                          A1.65 1.65 0 0 0 9 4.6
-                          c.3 0 .6-.1 1-.6
-                          a1.65 1.65 0 0 0 .33-1.82l-.06-.06
-                          a2 2 0 1 1 2.83 2.83l.06.06
-                          c.5.4.6.7.6 1s-.1.6-.6 1
-                          a1.65 1.65 0 0 0-.33 1.82
-                          c.2.4.5.6 1 .6
-                          c.3 0 .6-.1 1-.6l.06-.06
-                          a2 2 0 1 1 2.83 2.83l-.06.06
-                          c-.4.5-.6.7-.6 1s.1.6.6 1z" />
-                </svg>
-              </span>
-              {isExpanded && <span className="menu-label">Status Final-Assy</span>}
-            </Link>
+                {isExpanded && (
+                  <span className="menu-label">
+                    {menu.label}
+                  </span>
+                )}
+              </Link>
+            ))}
           </nav>
 
           {/* Footer */}
@@ -282,7 +364,7 @@ export const Sidebar = memo(function Sidebar({ userName = "User", userRole = "Ro
               {isExpanded && (
                 <div className="user-info">
                   <p className="user-name">{currentUserName}</p>
-                  <p className="user-role">Inspector GA</p>
+                  <p className="user-role">{currentRole}</p>
                 </div>
               )}
             </div>

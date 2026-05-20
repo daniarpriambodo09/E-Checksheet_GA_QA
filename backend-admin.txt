@@ -1,0 +1,763 @@
+// app/api/admin/areas/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import pool from '@/lib/db';
+
+export async function GET(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const categoryId = searchParams.get('categoryId');
+    const categoryCode = searchParams.get('categoryCode');
+    const areaType = searchParams.get('areaType');
+
+    let query = `
+      SELECT 
+        ca.id, ca.category_id, ca.area_name, ca.area_code, 
+        ca.description, ca.is_active, ca.sort_order, ca.created_at,
+        cc.category_code, cc.category_name, cc.table_type, cc.area_type
+      FROM checklist_areas ca
+      JOIN checklist_categories cc ON ca.category_id = cc.id
+      WHERE ca.is_active = TRUE
+    `;
+    const params: any[] = [];
+
+    if (categoryId) {
+      params.push(categoryId);
+      query += ` AND ca.category_id = $${params.length}`;
+    }
+
+    if (categoryCode) {
+      params.push(categoryCode);
+      query += ` AND cc.category_code = $${params.length}`;
+    }
+
+    if (areaType) {
+      params.push(areaType);
+      query += ` AND cc.area_type = $${params.length}`;
+    }
+
+    query += ` ORDER BY ca.sort_order ASC`;
+
+    const result = await pool.query(query, params);
+
+    return NextResponse.json({
+      success: true,
+      data: result.rows,
+      count: result.rows.length,
+    });
+
+  } catch (error: any) {
+    console.error('❌ Get areas error:', error);
+    return NextResponse.json(
+      { error: 'Failed to fetch areas', detail: error.message },
+      { status: 500 }
+    );
+  }
+}
+
+// app/api/admin/categories/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import pool from '@/lib/db';
+
+export async function GET(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const areaType = searchParams.get('areaType'); // e.g. "final-assy"
+    const tableType = searchParams.get('tableType'); // e.g. "inspector"
+
+    let query = `
+      SELECT id, category_name, category_code, table_type, area_type, is_active, sort_order
+      FROM checklist_categories
+      WHERE is_active = TRUE
+    `;
+    const params: any[] = [];
+
+    if (areaType) {
+      params.push(areaType);
+      query += ` AND area_type = $${params.length}`;
+    }
+
+    if (tableType) {
+      params.push(tableType);
+      query += ` AND table_type = $${params.length}`;
+    }
+
+    query += ` ORDER BY sort_order ASC`;
+
+    const result = await pool.query(query, params);
+
+    return NextResponse.json({
+      success: true,
+      data: result.rows,
+      count: result.rows.length,
+    });
+
+  } catch (error: any) {
+    console.error('❌ Get categories error:', error);
+    return NextResponse.json(
+      { error: 'Failed to fetch categories', detail: error.message },
+      { status: 500 }
+    );
+  }
+}
+
+// app/api/admin/gauge-qr-codes/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import pool from '@/lib/db';
+import { getServerAuth, shouldSkipAuth, isAdminRole } from '@/lib/auth-server';
+
+async function checkAdminAuth(request: NextRequest) {
+  if (shouldSkipAuth()) {
+    return { authorized: true, user: { id: 'dev', role: 'admin', username: 'dev' } };
+  }
+  const { user, error } = await getServerAuth(request);
+  if (error || !user || !isAdminRole(user.role)) {
+    return { authorized: false, user: null };
+  }
+  return { authorized: true, user };
+}
+
+// ── GET: list semua gauge QR codes (optional filter: ?areaType=pre-assy) ──────
+export async function GET(request: NextRequest) {
+  try {
+    const { authorized } = await checkAdminAuth(request);
+    if (!authorized) return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+
+    const { searchParams } = new URL(request.url);
+    const areaType = searchParams.get('areaType'); // 'pre-assy' | 'final-assy' | null
+
+    const query = areaType
+      ? `SELECT * FROM gauge_qr_codes WHERE is_active = TRUE AND area_type = $1 ORDER BY gauge_type_id, seq_number`
+      : `SELECT * FROM gauge_qr_codes WHERE is_active = TRUE ORDER BY area_type, gauge_type_id, seq_number`;
+
+    const result = areaType
+      ? await pool.query(query, [areaType])
+      : await pool.query(query);
+
+    return NextResponse.json({ success: true, data: result.rows, count: result.rows.length });
+  } catch (err: any) {
+    console.error('❌ GET gauge-qr-codes error:', err);
+    return NextResponse.json({ error: 'Server error', detail: err.message }, { status: 500 });
+  }
+}
+
+// ── POST: tambah gauge QR code baru ──────────────────────────────────────────
+export async function POST(request: NextRequest) {
+  try {
+    const { authorized, user } = await checkAdminAuth(request);
+    if (!authorized || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+
+    const body = await request.json();
+    const {
+      gaugeTypeId, gaugeTypeSlug, gaugeTypeName,
+      areaType, gaugeId, qrValue, displayName, seqNumber, notes,
+    } = body;
+
+    if (!gaugeTypeId || !areaType || !gaugeId || !qrValue || !displayName) {
+      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    }
+    if (!['pre-assy', 'final-assy'].includes(areaType)) {
+      return NextResponse.json({ error: 'Invalid areaType' }, { status: 400 });
+    }
+
+    // Cek duplikat gauge_id atau qr_value
+    const dup = await pool.query(
+      `SELECT id, gauge_id FROM gauge_qr_codes WHERE (gauge_id = $1 OR qr_value = $2) AND is_active = TRUE`,
+      [gaugeId, qrValue]
+    );
+    if (dup.rows.length > 0) {
+      return NextResponse.json(
+        { error: `Gauge ID "${dup.rows[0].gauge_id}" sudah digunakan.` },
+        { status: 409 }
+      );
+    }
+
+    const result = await pool.query(
+      `INSERT INTO gauge_qr_codes
+         (gauge_type_id, gauge_type_slug, gauge_type_name, area_type, gauge_id, qr_value,
+          display_name, seq_number, notes, created_by, created_at, updated_at, is_active)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW(),NOW(),TRUE)
+       RETURNING id, gauge_id, qr_value, created_at`,
+      [gaugeTypeId, gaugeTypeSlug, gaugeTypeName, areaType, gaugeId, qrValue,
+       displayName, seqNumber ?? 1, notes ?? null, String(user.id)]
+    );
+
+    return NextResponse.json({
+      success: true,
+      message: `Gauge QR "${gaugeId}" berhasil ditambahkan.`,
+      data: result.rows[0],
+    });
+  } catch (err: any) {
+    console.error('❌ POST gauge-qr-codes error:', err);
+    if (err.code === '23505') {
+      return NextResponse.json({ error: 'Gauge ID atau QR value sudah ada.' }, { status: 409 });
+    }
+    return NextResponse.json({ error: 'Server error', detail: err.message }, { status: 500 });
+  }
+}
+
+// ── PATCH: update gauge_id / display_name / notes ────────────────────────────
+export async function PATCH(request: NextRequest) {
+  try {
+    const { authorized } = await checkAdminAuth(request);
+    if (!authorized) return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+
+    const body = await request.json();
+    const { id, gaugeId, displayName, notes } = body;
+
+    if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 });
+
+    // Recalculate qr_value dari gaugeId baru jika berubah
+    // qr_value = "DCI-{gauge_type_id}-{gaugeId}"
+    const existing = await pool.query(
+      `SELECT gauge_type_id, gauge_id FROM gauge_qr_codes WHERE id = $1 AND is_active = TRUE`,
+      [id]
+    );
+    if (existing.rows.length === 0) {
+      return NextResponse.json({ error: 'Record not found' }, { status: 404 });
+    }
+    const { gauge_type_id, gauge_id: oldGaugeId } = existing.rows[0];
+
+    // Cek duplikat gauge_id baru (jika berubah)
+    if (gaugeId && gaugeId !== oldGaugeId) {
+      const dup = await pool.query(
+        `SELECT id FROM gauge_qr_codes WHERE gauge_id = $1 AND is_active = TRUE AND id != $2`,
+        [gaugeId, id]
+      );
+      if (dup.rows.length > 0) {
+        return NextResponse.json({ error: `Gauge ID "${gaugeId}" sudah digunakan.` }, { status: 409 });
+      }
+    }
+
+    const newGaugeId    = gaugeId ?? oldGaugeId;
+    const newQrValue    = `DCI-${gauge_type_id}-${newGaugeId}`;
+
+    const result = await pool.query(
+      `UPDATE gauge_qr_codes
+       SET gauge_id     = $1,
+           qr_value     = $2,
+           display_name = COALESCE($3, display_name),
+           notes        = $4,
+           updated_at   = NOW()
+       WHERE id = $5 AND is_active = TRUE
+       RETURNING id, gauge_id, qr_value, display_name, updated_at`,
+      [newGaugeId, newQrValue, displayName ?? null, notes ?? null, id]
+    );
+
+    if (result.rows.length === 0) {
+      return NextResponse.json({ error: 'Record not found' }, { status: 404 });
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: 'Gauge QR berhasil diperbarui.',
+      data: result.rows[0],
+    });
+  } catch (err: any) {
+    console.error('❌ PATCH gauge-qr-codes error:', err);
+    if (err.code === '23505') {
+      return NextResponse.json({ error: 'Gauge ID sudah ada.' }, { status: 409 });
+    }
+    return NextResponse.json({ error: 'Server error', detail: err.message }, { status: 500 });
+  }
+}
+
+// ── DELETE: soft-delete ───────────────────────────────────────────────────────
+export async function DELETE(request: NextRequest) {
+  try {
+    const { authorized } = await checkAdminAuth(request);
+    if (!authorized) return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get('id');
+    if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 });
+
+    const result = await pool.query(
+      `UPDATE gauge_qr_codes SET is_active = FALSE, updated_at = NOW()
+       WHERE id = $1 AND is_active = TRUE RETURNING id`,
+      [id]
+    );
+    if (result.rows.length === 0) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+    return NextResponse.json({ success: true, message: 'Gauge QR berhasil dihapus.', deletedId: id });
+  } catch (err: any) {
+    console.error('❌ DELETE gauge-qr-codes error:', err);
+    return NextResponse.json({ error: 'Server error', detail: err.message }, { status: 500 });
+  }
+}
+
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-user-id, x-user-role, x-username',
+    },
+  });
+}
+
+// app/api/admin/gauge-types/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import pool from '@/lib/db';
+import { getServerAuth, shouldSkipAuth, isAdminRole } from '@/lib/auth-server';
+
+async function checkAdminAuth(request: NextRequest) {
+  if (shouldSkipAuth()) {
+    return { authorized: true, user: { id: 'dev', role: 'admin', username: 'dev' } };
+  }
+  const { user, error } = await getServerAuth(request);
+  if (error || !user || !isAdminRole(user.role)) {
+    return { authorized: false, user: null };
+  }
+  return { authorized: true, user };
+}
+
+// Helper: Generate slug dari nama (lowercase, spasi jadi hyphen)
+function generateSlug(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+}
+
+// Helper: Generate abbrev dari nama (4 huruf pertama, uppercase, tanpa spasi)
+function generateAbbrev(name: string): string {
+  return name.replace(/\s+/g, '').slice(0, 4).toUpperCase();
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// GET: Ambil semua gauge types yang unik dan aktif dari database
+// ──────────────────────────────────────────────────────────────────────────────
+export async function GET(request: NextRequest) {
+  try {
+    const { authorized } = await checkAdminAuth(request);
+    if (!authorized) return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+
+    const { searchParams } = new URL(request.url);
+    const areaType = searchParams.get('areaType');
+
+    // ✅ PERBAIKAN: HAPUS 'abbrev' karena kolom tidak ada di database
+    const query = areaType
+      ? `SELECT DISTINCT gauge_type_id, gauge_type_slug, gauge_type_name, area_type 
+         FROM gauge_qr_codes 
+         WHERE area_type = $1 AND is_active = TRUE 
+         ORDER BY gauge_type_name`
+      : `SELECT DISTINCT gauge_type_id, gauge_type_slug, gauge_type_name, area_type 
+         FROM gauge_qr_codes 
+         WHERE is_active = TRUE 
+         ORDER BY area_type, gauge_type_name`;
+
+    const result = areaType
+      ? await pool.query(query, [areaType])
+      : await pool.query(query);
+
+    return NextResponse.json({ 
+      success: true, 
+      data: result.rows, 
+      count: result.rows.length 
+    });
+  } catch (err: any) {
+    console.error('❌ GET gauge-types error:', err);
+    return NextResponse.json({ error: 'Server error', detail: err.message }, { status: 500 });
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// POST: Tambah gauge type baru
+// ──────────────────────────────────────────────────────────────────────────────
+export async function POST(request: NextRequest) {
+  try {
+    const { authorized, user } = await checkAdminAuth(request);
+    if (!authorized || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+
+    const body = await request.json();
+    let { gaugeTypeName, gaugeTypeSlug, areaType, dciItemId, abbrev } = body;
+
+    if (!gaugeTypeName || !areaType) {
+      return NextResponse.json({ error: 'Missing required fields: gaugeTypeName, areaType' }, { status: 400 });
+    }
+
+    if (!['pre-assy', 'final-assy'].includes(areaType)) {
+      return NextResponse.json({ error: 'Invalid areaType. Must be "pre-assy" or "final-assy"' }, { status: 400 });
+    }
+
+    // Auto-generate slug dari nama jika tidak disediakan
+    if (!gaugeTypeSlug) {
+      gaugeTypeSlug = generateSlug(gaugeTypeName);
+    }
+
+    // Auto-generate abbrev jika tidak disediakan (hanya untuk kalkulasi di frontend)
+    if (!abbrev) {
+      abbrev = generateAbbrev(gaugeTypeName);
+    }
+
+    // Auto-generate dciItemId (MAX + 1 untuk area_type ini)
+    if (!dciItemId) {
+      const maxIdResult = await pool.query(
+        `SELECT COALESCE(MAX(gauge_type_id), 0) as max_id FROM gauge_qr_codes WHERE area_type = $1`,
+        [areaType]
+      );
+      dciItemId = (maxIdResult.rows[0]?.max_id || 0) + 1;
+    }
+
+    // Convert nama ke UPPERCASE untuk konsistensi database
+    const normalizedName = gaugeTypeName.trim().toUpperCase();
+    const normalizedSlug = gaugeTypeSlug.trim().toLowerCase();
+
+    // Cek apakah gauge type dengan slug+area_type ini sudah ada dan aktif
+    const existing = await pool.query(
+      `SELECT gauge_type_id, gauge_type_name FROM gauge_qr_codes 
+       WHERE gauge_type_slug = $1 AND area_type = $2 AND is_active = TRUE 
+       LIMIT 1`,
+      [normalizedSlug, areaType]
+    );
+
+    if (existing.rows.length > 0) {
+      return NextResponse.json({
+        success: true,
+        message: 'Gauge type sudah ada',
+        data: {
+          gauge_type_id: existing.rows[0].gauge_type_id,
+          gauge_type_slug: normalizedSlug,
+          gauge_type_name: existing.rows[0].gauge_type_name,
+          area_type: areaType
+        },
+        exists: true
+      });
+    }
+
+    // ✅ PERBAIKAN: HAPUS 'abbrev' dari INSERT karena kolom tidak ada di database
+    const result = await pool.query(
+      `INSERT INTO gauge_qr_codes 
+       (gauge_type_id, gauge_type_slug, gauge_type_name, area_type, 
+        gauge_id, qr_value, display_name, seq_number, is_active, created_by, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 0, TRUE, $8, NOW(), NOW())
+       ON CONFLICT (gauge_type_slug, area_type) DO UPDATE 
+       SET updated_at = NOW()
+       RETURNING gauge_type_id, gauge_type_slug, gauge_type_name, area_type`,
+      [
+        dciItemId,
+        normalizedSlug,
+        normalizedName,
+        areaType,
+        `TEMP-${normalizedSlug.toUpperCase()}`,  // gauge_id placeholder untuk template
+        `DCI-${dciItemId}-TEMP`,                  // qr_value placeholder untuk template
+        `${normalizedName} [Template]`,           // display_name placeholder untuk template
+        String(user.id)
+      ]
+    );
+
+    return NextResponse.json({
+      success: true,
+      message: 'Gauge type baru berhasil dibuat',
+      data: result.rows[0],
+      exists: false
+    });
+
+  } catch (err: any) {
+    console.error('❌ POST gauge-types error:', err);
+    
+    if (err.code === '23505') {
+      return NextResponse.json({ 
+        error: 'Gauge type dengan slug ini sudah ada untuk area tersebut.',
+        detail: 'Silakan gunakan nama atau slug yang berbeda.'
+      }, { status: 409 });
+    }
+    
+    return NextResponse.json({ error: 'Server error', detail: err.message }, { status: 500 });
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// DELETE: Soft delete gauge type
+// ──────────────────────────────────────────────────────────────────────────────
+export async function DELETE(request: NextRequest) {
+  try {
+    const { authorized, user } = await checkAdminAuth(request);
+    if (!authorized || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+
+    const { searchParams } = new URL(request.url);
+    const gaugeTypeSlug = searchParams.get('gaugeTypeSlug');
+    const areaType = searchParams.get('areaType');
+
+    if (!gaugeTypeSlug || !areaType) {
+      return NextResponse.json({ error: 'Missing required parameters: gaugeTypeSlug, areaType' }, { status: 400 });
+    }
+
+    if (!['pre-assy', 'final-assy'].includes(areaType)) {
+      return NextResponse.json({ error: 'Invalid areaType' }, { status: 400 });
+    }
+
+    // Hitung berapa gauge QR aktif yang menggunakan tipe ini
+    const countResult = await pool.query(
+      `SELECT COUNT(*) as count FROM gauge_qr_codes 
+       WHERE gauge_type_slug = $1 AND area_type = $2 AND is_active = TRUE AND seq_number > 0`,
+      [gaugeTypeSlug, areaType]
+    );
+    const activeGaugeCount = parseInt(countResult.rows[0].count);
+
+    // Soft delete: Set is_active = FALSE untuk semua record dengan gauge_type_slug + area_type ini
+    const result = await pool.query(
+      `UPDATE gauge_qr_codes 
+       SET is_active = FALSE, updated_at = NOW() 
+       WHERE gauge_type_slug = $1 AND area_type = $2 AND is_active = TRUE`,
+      [gaugeTypeSlug, areaType]
+    );
+
+    if (result.rowCount === 0) {
+      return NextResponse.json({ error: 'Gauge type tidak ditemukan atau sudah tidak aktif' }, { status: 404 });
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: `Gauge type "${gaugeTypeSlug}" berhasil dihapus (soft delete)`,
+      deleted: true,
+      details: {
+        areaType,
+        gaugeTypeSlug,
+        affectedRecords: result.rowCount,
+        activeGaugeQRCodesHidden: activeGaugeCount,
+        note: activeGaugeCount > 0 
+          ? `${activeGaugeCount} gauge QR yang sudah ada tetap dapat digunakan, hanya tidak muncul di form tambah baru`
+          : 'Tidak ada gauge QR aktif yang terpengaruh'
+      }
+    });
+
+  } catch (err: any) {
+    console.error('❌ DELETE gauge-types error:', err);
+    return NextResponse.json({ error: 'Server error', detail: err.message }, { status: 500 });
+  }
+}
+
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-user-id, x-user-role, x-username',
+    },
+  });
+}
+
+// app/api/admin/qr-codes/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import pool from '@/lib/db';
+import { getAuth } from '@/lib/auth-context';
+
+// ✅ GET: Ambil semua QR codes tersimpan
+export async function GET(request: NextRequest) {
+  try {
+    // ✅ Auth check server-side
+    const { user, error } = await getAuth(request);
+    
+    if (error || !user || user.role !== 'admin') {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 403 }
+      );
+    }
+
+    const result = await pool.query(`
+      SELECT 
+        qrc.*,
+        u.username as created_by_username
+      FROM qr_codes qrc
+      LEFT JOIN users u ON qrc.created_by = u.id
+      WHERE qrc.is_active = TRUE
+      ORDER BY qrc.created_at DESC
+    `);
+
+    const qrCodes = result.rows.map((row: any) => ({
+      id: row.id,
+      category: row.category_code,
+      categoryLabel: row.category_label,
+      role: row.role,
+      roleLabel: row.role_label,
+      areaCode: row.area_code,
+      areaLabel: row.area_label,
+      qrValue: row.qr_value,
+      createdAt: row.created_at,
+      createdBy: row.created_by_username || row.created_by,
+      isActive: row.is_active
+    }));
+
+    return NextResponse.json({
+      success: true,
+      qrCodes,
+      count: qrCodes.length
+    });
+
+  } catch (error: any) {
+    console.error('❌ Get QR codes error:', error);
+    return NextResponse.json(
+      { error: 'Server error', detail: error.message },
+      { status: 500 }
+    );
+  }
+}
+
+// ✅ POST: Simpan QR code baru
+export async function POST(request: NextRequest) {
+  try {
+    const { user, error } = await getAuth(request);
+    
+    if (error || !user || user.role !== 'admin') {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 403 }
+      );
+    }
+
+    const body = await request.json();
+    const {
+      categoryCode,
+      categoryLabel,
+      role,
+      roleLabel,
+      areaCode,
+      areaLabel,
+      qrValue,
+      createdBy
+    } = body;
+
+    // ✅ Validasi required fields
+    if (!categoryCode || !role || !areaCode || !qrValue) {
+      return NextResponse.json(
+        { error: 'Missing required fields' },
+        { status: 400 }
+      );
+    }
+
+    // ✅ Validasi uniqueness (opsional: prevent duplicate)
+    const existing = await pool.query(
+      `SELECT id FROM qr_codes 
+       WHERE category_code = $1 AND role = $2 AND area_code = $3 AND qr_value = $4`,
+      [categoryCode, role, areaCode, qrValue]
+    );
+
+    if (existing.rows.length > 0) {
+      return NextResponse.json(
+        { 
+          error: 'QR Code dengan konfigurasi ini sudah ada',
+          existingId: existing.rows[0].id
+        },
+        { status: 409 }
+      );
+    }
+
+    // ✅ Insert ke database
+    const result = await pool.query(
+      `INSERT INTO qr_codes (
+         category_code,
+         category_label,
+         role,
+         role_label,
+         area_code,
+         area_label,
+         qr_value,
+         created_by,
+         created_at,
+         updated_at,
+         is_active
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW(), TRUE)
+       RETURNING id, created_at`,
+      [
+        categoryCode,
+        categoryLabel,
+        role,
+        roleLabel,
+        areaCode,
+        areaLabel,
+        qrValue,
+        createdBy || user.id
+      ]
+    );
+
+    return NextResponse.json({
+      success: true,
+      message: 'QR Code berhasil disimpan',
+      data: {
+        id: result.rows[0].id,
+        createdAt: result.rows[0].created_at
+      }
+    });
+
+  } catch (error: any) {
+    console.error('❌ Save QR code error:', error);
+    
+    if (error.code === '23505') {
+      return NextResponse.json(
+        { error: 'Duplicate entry' },
+        { status: 409 }
+      );
+    }
+    
+    return NextResponse.json(
+      { error: 'Failed to save QR code', detail: error.message },
+      { status: 500 }
+    );
+  }
+}
+
+// ✅ DELETE: Hapus QR code
+export async function DELETE(request: NextRequest) {
+  try {
+    const { user, error } = await getAuth(request);
+    
+    if (error || !user || user.role !== 'admin') {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 403 }
+      );
+    }
+
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get('id');
+
+    if (!id) {
+      return NextResponse.json(
+        { error: 'QR Code ID required' },
+        { status: 400 }
+      );
+    }
+
+    // ✅ Soft delete (update is_active = false)
+    const result = await pool.query(
+      `UPDATE qr_codes 
+       SET is_active = FALSE, updated_at = NOW()
+       WHERE id = $1 AND is_active = TRUE
+       RETURNING id`,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return NextResponse.json(
+        { error: 'QR Code not found or already deleted' },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: 'QR Code berhasil dihapus',
+      deletedId: id
+    });
+  } catch (error: any) {
+    console.error('❌ Delete QR code error:', error);
+    return NextResponse.json(
+      { error: 'Failed to delete QR code', detail: error.message },
+      { status: 500 }
+    );
+  }
+}
+
+// ✅ OPTIONS untuk CORS
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    },
+  });
+}

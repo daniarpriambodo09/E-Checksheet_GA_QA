@@ -5,7 +5,10 @@ import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import { AuthProvider } from '@/lib/auth-context'
+import SyncListener from '@/components/SyncListener'
+import { PWARegister } from "@/components/PWARegister"
 import './globals.css'
+import { DeviceGuard } from "@/lib/device/DeviceGuard"
 
 const inter = Inter({ 
   subsets: ["latin"],
@@ -17,6 +20,7 @@ export const metadata: Metadata = {
   title: 'E-Checksheet - Management System',
   description: 'Sistem manajemen checklist elektronik untuk PT JAI',
   generator: 'v0.app',
+  manifest: '/manifest.json',
   icons: {
     icon: [
       {
@@ -44,9 +48,14 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${inter.className} antialiased`}>
-        <AuthProvider>
-          {children}
-        </AuthProvider>
+        {/* PWA: warm-up cache halaman penting setelah SW aktif */}
+        <PWARegister />
+        <SyncListener />
+          <AuthProvider>
+            <DeviceGuard>
+              {children}
+            </DeviceGuard>
+          </AuthProvider>
         <Analytics />
       </body>
     </html>

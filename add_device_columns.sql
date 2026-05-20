@@ -1,0 +1,1 @@
+ALTER TABLE registered_devices ADD COLUMN device_code VARCHAR(50) UNIQUE, ADD COLUMN is_bound BOOLEAN DEFAULT FALSE;

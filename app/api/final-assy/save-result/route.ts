@@ -2,6 +2,8 @@
 // Diupdate: terima field `conveyor` dari frontend (untuk inspector mode),
 // simpan ke kolom `conveyor` DAN `carline` di checklist_results agar
 // get-carline-line dapat membaca data dari kedua kolom (backward compat).
+// Diupdate: terima field `device_code` dari frontend (TC21 physical binding),
+// simpan ke kolom `device_code` di checklist_results untuk audit trail perangkat.
 
 import { NextRequest, NextResponse } from 'next/server';
 import pool from '@/lib/db';
@@ -20,7 +22,9 @@ export async function POST(request: NextRequest) {
       specificArea: body.specificArea,
       carline:      body.carline,
       line:         body.line,
-      conveyor:     body.conveyor,   // ← field baru
+      conveyor:     body.conveyor,    // ← field baru
+      pattern:      body.pattern,     // ← field baru
+      deviceCode:   body.deviceCode,  // ← TC21 device code
       timeSlot:     body.timeSlot,
     }));
 
@@ -39,7 +43,9 @@ export async function POST(request: NextRequest) {
       carline,
       line,
       specificArea,
-      conveyor,   // ← field baru dari frontend
+      conveyor,    // ← field baru dari frontend
+      pattern,     // ← field baru dari frontend
+      deviceCode,  // ← TC21 physical device code untuk audit trail
     } = body;
 
     if (!userId || !categoryCode || itemId === undefined || !dateKey || !shift || !status) {
@@ -154,6 +160,11 @@ export async function POST(request: NextRequest) {
     const carlineVal    = normalizedConveyor;   // isi carline = conveyor (compat)
     const lineVal: null = null;                  // line selalu null untuk conveyor mode
 
+    // device_code: dari TC21 physical binding — null untuk desktop/browser biasa
+    const deviceCodeVal = (typeof deviceCode === 'string' && deviceCode.trim())
+      ? deviceCode.trim().toUpperCase()
+      : null;
+
     console.log(
       `✅ [FA Save] gaugeId="${gaugeId}" specificArea="${specificAreaVal}" ` +
       `conveyor="${normalizedConveyor}"`
@@ -245,7 +256,7 @@ export async function POST(request: NextRequest) {
     );
 
     if ((existingRow.rowCount ?? 0) > 0) {
-      // UPDATE — update juga kolom conveyor
+      // UPDATE — update juga kolom conveyor dan pattern
       await client.query(
         `UPDATE checklist_results SET
           status         = $1,
@@ -254,26 +265,29 @@ export async function POST(request: NextRequest) {
           ng_photos      = $4,
           time_slot      = $5,
           conveyor       = $6,
+          pattern        = $7,
+          device_code    = COALESCE($8, device_code),
           updated_at     = NOW()
-         WHERE id = $7`,
+         WHERE id = $9`,
         [status, ngDescVal, ngDeptVal, ngPhotosVal, gaugeId,
-         normalizedConveyor, existingRow.rows[0].id]
+         normalizedConveyor, pattern, deviceCodeVal, existingRow.rows[0].id]
       );
       console.log(
         `✅ [FA Save] UPDATE id=${existingRow.rows[0].id} ` +
         `item=${actualItemId} shift=${shift} conveyor="${normalizedConveyor}"`
       );
     } else {
-      // INSERT — sertakan kolom conveyor
+      // INSERT — sertakan kolom conveyor dan pattern
       await client.query(
         `INSERT INTO checklist_results (
           user_id, nik, category_id, item_id,
           date_key, shift, time_slot, status,
           ng_description, ng_department, ng_photos,
-          area_id, carline, line, conveyor, specific_area,
+          area_id, carline, line, conveyor, specific_area, pattern,
+          device_code,
           submitted_at, created_at, updated_at
         ) VALUES (
-          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
+          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,
           NOW(),NOW(),NOW()
         )
         ON CONFLICT (
@@ -293,12 +307,15 @@ export async function POST(request: NextRequest) {
           specific_area  = EXCLUDED.specific_area,
           conveyor       = EXCLUDED.conveyor,
           carline        = EXCLUDED.carline,
+          pattern        = EXCLUDED.pattern,
+          device_code    = COALESCE(EXCLUDED.device_code, checklist_results.device_code),
           updated_at     = NOW()`,
         [
           userId, nik, categoryId, actualItemId,
           dateKey, shift, gaugeId, status,
           ngDescVal, ngDeptVal, ngPhotosVal,
-          areaId, carlineVal, lineVal, normalizedConveyor, specificAreaVal,
+          areaId, carlineVal, lineVal, normalizedConveyor, specificAreaVal, pattern,
+          deviceCodeVal,
         ]
       );
       console.log(
@@ -316,6 +333,7 @@ export async function POST(request: NextRequest) {
         dateKey, shift, status, areaId,
         specificArea: specificAreaVal,
         conveyor:     normalizedConveyor,
+        deviceCode:   deviceCodeVal,
         gaugeId,
       },
     });
