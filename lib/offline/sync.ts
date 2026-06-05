@@ -33,7 +33,7 @@ async function uploadBase64Photo(dataUrl: string, index: number): Promise<string
   const fd = new FormData();
   fd.append("file", file);
 
-  const res = await fetch("/api/upload-image", { method: "POST", body: fd });
+  const res = await fetch("/e-checksheet-qa/api/upload-image", { method: "POST", body: fd });
   if (!res.ok) throw new Error(`Upload foto gagal: HTTP ${res.status}`);
 
   const data = await res.json();
@@ -169,12 +169,28 @@ export async function syncChecklist(): Promise<void> {
 
   try {
     const allChecklists    = await db.checklists.toArray();
-    const unsyncedChecklists = allChecklists.filter(item => item.synced === false);
-    console.log('[syncChecklist] Unsynced items found:', unsyncedChecklists.length);
+    // [FIX] Gunakan == bukan === karena IndexedDB kadang menyimpan false sebagai 0 (integer)
+    // sehingga strict equality `=== false` mengembalikan false untuk nilai 0.
+    // eslint-disable-next-line eqeqeq
+    const unsyncedChecklists = allChecklists.filter(item => item.synced == false && item.synced !== null && item.synced !== undefined);
+    console.log('[syncChecklist] Unsynced items found:', unsyncedChecklists.length,
+      '| All items:', allChecklists.length,
+      '| synced values:', allChecklists.map(i => ({ id: i.id, synced: i.synced, type: typeof i.synced })));
 
     for (const item of unsyncedChecklists) {
       try {
         console.log('[syncChecklist] Syncing item', item.id, 'to', item.endpoint);
+
+        // [FIX] Normalisasi endpoint: tambahkan prefix /e-checksheet-qa jika endpoint
+        // disimpan tanpa prefix (misalnya "/api/final-assy/save-result").
+        // Ini terjadi karena page.tsx menyimpan endpoint tanpa prefix saat online,
+        // tetapi semua API calls dari browser harus lewat /e-checksheet-qa/api/...
+        const APP_PREFIX = '/e-checksheet-qa';
+        const normalizedEndpoint = item.endpoint.startsWith(APP_PREFIX)
+          ? item.endpoint
+          : `${APP_PREFIX}${item.endpoint}`;
+        console.log('[syncChecklist] Syncing item', item.id,
+          'endpoint:', item.endpoint, '→', normalizedEndpoint);
 
         // [OFFLINE PHOTO] Upload base64 photos terlebih dahulu
         // Ganti base64 strings di payload.ngPhotos dengan server URL
@@ -192,7 +208,7 @@ export async function syncChecklist(): Promise<void> {
           await db.checklists.update(item.id, { payload: resolvedPayload });
         }
 
-        const response = await fetch(item.endpoint, {
+        const response = await fetch(normalizedEndpoint, {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
           body:    JSON.stringify(resolvedPayload),

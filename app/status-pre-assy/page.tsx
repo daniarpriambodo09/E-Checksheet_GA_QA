@@ -131,7 +131,7 @@ function AreaFilter({ categoryCode, selectedArea, onAreaChange, isLoading = fals
   useEffect(() => {
     if (!categoryCode) return;
     setIsFetching(true);
-    fetch(`/api/areas/get-by-category?categoryCode=${encodeURIComponent(categoryCode)}`)
+    fetch(`/e-checksheet-qa/api/areas/get-by-category?categoryCode=${encodeURIComponent(categoryCode)}`)
       .then(r => r.json())
       .then(data => {
         if (data.success && data.areas?.length > 0) {
@@ -439,7 +439,7 @@ export default function PreAssyGLStatusPage() {
     try {
       const specAreaParam = (viewMode === "daily-check-ins" && specArea)
         ? `&specificArea=${encodeURIComponent(specArea)}` : ""
-      const url = `/api/pre-assy/get-carline-line?areaCode=${encodeURIComponent(area)}${specAreaParam}`
+      const url = `/e-checksheet-qa/api/pre-assy/get-carline-line?areaCode=${encodeURIComponent(area)}${specAreaParam}`
       const res = await fetch(url)
       if (!res.ok) return
       const data = await res.json()
@@ -473,8 +473,8 @@ export default function PreAssyGLStatusPage() {
         ? `&specificArea=${encodeURIComponent(selectedSpecificArea)}` : ""
 
       const [rRes, sRes] = await Promise.all([
-        fetch(`/api/pre-assy/get-results?userId=${user.id}&categoryCode=${categoryCode}&month=${monthKey}${areaParam}${conveyorParam}${specificAreaParam}`),
-        fetch(`/api/pre-assy/get-signatures?userId=${user.id}&categoryCode=${categoryCode}&month=${monthKey}${areaParam}`)
+        fetch(`/e-checksheet-qa/api/pre-assy/get-results?userId=${user.id}&categoryCode=${categoryCode}&month=${monthKey}${areaParam}${conveyorParam}${specificAreaParam}`),
+        fetch(`/e-checksheet-qa/api/pre-assy/get-signatures?userId=${user.id}&categoryCode=${categoryCode}&month=${monthKey}${areaParam}`)
       ])
       if (!rRes.ok || !sRes.ok) throw new Error("Gagal memuat data")
       const rData = await rRes.json(), sData = await sRes.json()

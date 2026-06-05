@@ -43,7 +43,7 @@ export default function CarlineLineSection({
     setIsFetching(true);
     try {
       const res  = await fetch(
-        `/api/final-assy/get-carline-line?areaCode=${encodeURIComponent(code)}`
+        `/e-checksheet-qa/api/final-assy/get-carline-line?areaCode=${encodeURIComponent(code)}`
       );
       if (!res.ok) return;
       const data = await res.json();
@@ -85,7 +85,7 @@ export default function CarlineLineSection({
     setIsSaving(true);
     setError(null);
     try {
-      const res = await fetch('/api/final-assy/save-conveyor', {
+      const res = await fetch('/e-checksheet-qa/api/final-assy/save-conveyor', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ conveyor: cv, areaCode, userId, categoryCode }),

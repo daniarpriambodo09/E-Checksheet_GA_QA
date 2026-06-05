@@ -34,7 +34,7 @@ export function AreaFilter({
     const fetchAreas = async () => {
       setIsFetching(true);
       try {
-        const res = await fetch(`/api/areas/get-by-category?categoryCode=${encodeURIComponent(categoryCode)}`);
+        const res = await fetch(`/e-checksheet-qa/api/areas/get-by-category?categoryCode=${encodeURIComponent(categoryCode)}`);
         const data = await res.json();
         if (data.success && data.areas?.length > 0) {
           setAreas(data.areas);

@@ -38,7 +38,7 @@ export default function ConveyorSection({
     if (!code) return;
     setIsFetching(true);
     try {
-      const res  = await fetch(`/api/final-assy/get-carline-line?areaCode=${encodeURIComponent(code)}`);
+      const res  = await fetch(`/e-checksheet-qa/api/final-assy/get-carline-line?areaCode=${encodeURIComponent(code)}`);
       if (!res.ok) return;
       const data = await res.json();
       if (Array.isArray(data)) {
@@ -96,7 +96,7 @@ export default function ConveyorSection({
     setIsSaving(true);
     setError(null);
     try {
-      const res = await fetch('/api/final-assy/save-conveyor', {
+      const res = await fetch('/e-checksheet-qa/api/final-assy/save-conveyor', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ conveyor: cv, areaCode, userId, categoryCode }),
@@ -134,7 +134,7 @@ export default function ConveyorSection({
     setDeleteError(null);
 
     try {
-      const res = await fetch('/api/final-assy/delete-conveyor', {
+      const res = await fetch('/e-checksheet-qa/api/final-assy/delete-conveyor', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ conveyor: value, categoryCode, userId, areaCode }),

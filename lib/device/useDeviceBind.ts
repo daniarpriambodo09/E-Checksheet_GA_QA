@@ -167,7 +167,7 @@ export function useDeviceBind() {
     });
 
     try {
-      const response = await fetch('/api/device/bind', {
+      const response = await fetch('/e-checksheet-qa/api/device/bind', {
         method:      'POST',
         headers:     { 'Content-Type': 'application/json' },
         body:        JSON.stringify(requestBody),

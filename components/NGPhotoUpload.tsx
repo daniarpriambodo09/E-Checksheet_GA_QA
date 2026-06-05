@@ -155,8 +155,8 @@ function isValidServerUrl(url: unknown): url is string {
   if (url.startsWith("blob:")) return true;
   // Path server normal
   if (
-    url.startsWith("/api/uploads/") ||
-    url.startsWith("/uploads/") ||
+    url.startsWith("/e-checksheet-qa/api/uploads/") ||
+    url.startsWith("/e-checksheet-qa/uploads/") ||
     /^https?:\/\//.test(url)
   ) return true;
   return false;
@@ -165,8 +165,8 @@ function isValidServerUrl(url: unknown): url is string {
 /** Foto sudah ter-upload ke server (bukan hanya tersimpan lokal offline) */
 function isUploadedServerUrl(url: string): boolean {
   return (
-    url.startsWith("/api/uploads/") ||
-    url.startsWith("/uploads/") ||
+    url.startsWith("/e-checksheet-qa/api/uploads/") ||
+    url.startsWith("/e-checksheet-qa/uploads/") ||
     /^https?:\/\//.test(url)
   );
 }
@@ -184,7 +184,7 @@ async function uploadToServer(blob: Blob, originalName: string): Promise<string>
   // [FIX] Gunakan try/catch ketat & log status HTTP agar debug mudah
   let res: Response;
   try {
-    res = await fetch("/api/upload-image", { method: "POST", body: fd });
+    res = await fetch("/e-checksheet-qa/api/upload-image", { method: "POST", body: fd });
   } catch (networkErr: any) {
     console.error("[upload] Network error:", networkErr);
     throw new Error("Tidak dapat terhubung ke server. Periksa koneksi jaringan.");

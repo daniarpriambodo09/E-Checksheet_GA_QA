@@ -570,7 +570,7 @@ function ChecksheetPreAssyPageInner() {
 
     setIsCheckingDuplicate(itemId);
     try {
-      const res = await fetch("/api/pre-assy/check-duplicate", {
+      const res = await fetch("/e-checksheet-qa/api/pre-assy/check-duplicate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -823,7 +823,7 @@ function ChecksheetPreAssyPageInner() {
   const fetchConveyorOptions = useCallback(async (code: string) => {
     if (!code) return;
     try {
-      const res  = await fetch(`/api/pre-assy/get-carline-line?areaCode=${encodeURIComponent(code)}`);
+      const res  = await fetch(`/e-checksheet-qa/api/pre-assy/get-carline-line?areaCode=${encodeURIComponent(code)}`);
       if (!res.ok) return;
       const data = await res.json();
       if (Array.isArray(data)) {
@@ -866,7 +866,7 @@ function ChecksheetPreAssyPageInner() {
 
     setIsSavingConveyor(true); setConveyorError(null);
     try {
-      const res = await fetch("/api/pre-assy/save-conveyor", {
+      const res = await fetch("/e-checksheet-qa/api/pre-assy/save-conveyor", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           conveyor: cv,
@@ -915,7 +915,7 @@ function ChecksheetPreAssyPageInner() {
     setIsDropdownOpen(false);
 
     try {
-      const res = await fetch('/api/pre-assy/delete-conveyor', {
+      const res = await fetch('/e-checksheet-qa/api/pre-assy/delete-conveyor', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1144,7 +1144,7 @@ function ChecksheetPreAssyPageInner() {
           }
 
           try {
-            const res = await fetch("/api/pre-assy/save-result", {
+            const res = await fetch("/e-checksheet-qa/api/pre-assy/save-result", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify(payload),

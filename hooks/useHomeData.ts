@@ -9,8 +9,8 @@ export function useHomeData() {
     const fetchData = async () => {
       try {
         const [statRes, laporanRes] = await Promise.all([
-          fetch('/api/home/statistik'),
-          fetch('/api/home/laporan-terbaru')
+          fetch('/e-checksheet-qa/api/home/statistik'),
+          fetch('/e-checksheet-qa/api/home/laporan-terbaru')
         ]);
         
         const statistik = await statRes.json();

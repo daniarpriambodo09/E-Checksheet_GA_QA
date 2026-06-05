@@ -487,7 +487,7 @@ function RegisterModal({
     if (!deviceCode.trim()) { setError("Device Code wajib diisi."); return; }
     setSubmitting(true); setError(null);
     try {
-      const res = await authFetch("/api/admin/devices", {
+      const res = await authFetch("/e-checksheet-qa/api/admin/devices", {
         method: "POST",
         body: JSON.stringify({
           device_code:  deviceCode.trim().toUpperCase(),
@@ -607,7 +607,7 @@ export default function DevicesPage() {
   const loadDevices = useCallback(async () => {
     setIsLoading(true); setApiError(null);
     try {
-      const res = await authFetch("/api/admin/devices");
+      const res = await authFetch("/e-checksheet-qa/api/admin/devices");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (!data.success) throw new Error(data.error || "Unknown error");

@@ -50,7 +50,7 @@ export async function callDeviceCheck(payload: {
 
   try {
     const response = await fetchWithTimeout(
-      '/api/device/check',
+      '/e-checksheet-qa/api/device/check',
       {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },

@@ -220,7 +220,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       try {
-        const response = await fetch("/api/auth/signup", {
+        const response = await fetch("/e-checksheet-qa/api/auth/signup", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -275,7 +275,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     try {
-      const response = await fetch("/api/auth/login", {
+      const response = await fetch("/e-checksheet-qa/api/auth/login", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

@@ -41,7 +41,7 @@ export default function CarlineLineFilter({
 
       setIsFetching(true);
       try {
-        const res = await fetch(`/api/final-assy/get-carline-line?areaId=${areaId}`);
+        const res = await fetch(`/e-checksheet-qa/api/final-assy/get-carline-line?areaId=${areaId}`);
         if (res.ok) {
           const data = await res.json();
           setHistory(Array.isArray(data) ? data : []);

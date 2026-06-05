@@ -3,7 +3,7 @@
 //         Conveyor, Pattern, Spesifik Area dipilih SETELAH scan di card /home
 
 "use client";
-import { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { Sidebar } from "@/components/Sidebar";
@@ -262,8 +262,49 @@ function AreaQRCard({ area, shift, index }: {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GaugeQRCard, EditGaugeModal, AddGaugeModal, DeleteGaugeModal
-// (tidak berubah dari versi sebelumnya — di-include lengkap)
+// Shared helpers (used by Add/Edit modals)
+// ─────────────────────────────────────────────────────────────────────────────
+function buildQrValue(gaugeTypeId: number, gaugeId: string) {
+  return `DCI-${gaugeTypeId}-${gaugeId}`;
+}
+function buildDefaultGaugeId(areaType: "pre-assy" | "final-assy", slug: string, seq: number) {
+  const prefix = areaType === "pre-assy" ? "PA" : "FA";
+  return `${prefix}-${slug.toUpperCase().slice(0, 3)}-${String(seq).padStart(2, "0")}`;
+}
+
+// ── Shared Modal Shell ────────────────────────────────────────────────────────
+function ModalShell({ color, title, onClose, children }: {
+  color: string; title: string; onClose: () => void; children: React.ReactNode;
+}) {
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.55)", zIndex:9000, display:"flex", alignItems:"center", justifyContent:"center", padding:20, overflowY:"auto" }} onClick={onClose}>
+      <div style={{ background:"white", borderRadius:16, width:"100%", maxWidth:480, boxShadow:"0 8px 40px rgba(0,0,0,.2)", overflow:"hidden", marginTop:"auto", marginBottom:"auto" }} onClick={e => e.stopPropagation()}>
+        <div style={{ background:color, padding:"16px 20px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+          <span style={{ fontSize:14, fontWeight:700, color:"white" }}>{title}</span>
+          <button onClick={onClose} style={{ background:"rgba(255,255,255,.15)", border:"none", color:"white", width:28, height:28, borderRadius:6, cursor:"pointer", fontSize:13, fontWeight:700 }}>✕</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// ── Shared Modal Footer ───────────────────────────────────────────────────────
+function ModalFooter({ onClose, onSave, saving, saveLabel }: {
+  onClose: () => void; onSave: () => void; saving: boolean; saveLabel: string; color?: string;
+}) {
+  return (
+    <div style={{ padding:"16px 20px", borderTop:"1px solid #e2e8f0", display:"flex", gap:10, justifyContent:"flex-end" }}>
+      <button onClick={onClose} disabled={saving} style={{ padding:"9px 20px", background:"#f1f5f9", border:"1.5px solid #e2e8f0", borderRadius:8, fontSize:13, fontWeight:600, color:"#475569", cursor:"pointer" }}>Batal</button>
+      <button onClick={onSave} disabled={saving} style={{ padding:"9px 24px", background:"#3b82f6", color:"white", border:"none", borderRadius:8, fontSize:13, fontWeight:700, cursor:"pointer", opacity:saving ? .6 : 1 }}>
+        {saving ? "Menyimpan..." : saveLabel}
+      </button>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GaugeQRCard, EditGaugeModal, AddGaugeModal
 // ─────────────────────────────────────────────────────────────────────────────
 function GaugeQRCard({ row, onEdit, onDelete }: { row: GaugeQRRow; onEdit: (r: GaugeQRRow) => void; onDelete: (id: number) => void; }) {
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -333,6 +374,229 @@ function GaugeQRCard({ row, onEdit, onDelete }: { row: GaugeQRRow; onEdit: (r: G
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// EditGaugeModal
+// ─────────────────────────────────────────────────────────────────────────────
+function EditGaugeModal({ row, onSave, onClose }: {
+  row: GaugeQRRow;
+  onSave: (id: number, gaugeId: string, displayName: string, notes: string) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [gaugeId, setGaugeId]       = useState(row.gauge_id);
+  const [displayName, setDisplayName] = useState(row.display_name);
+  const [notes, setNotes]           = useState(row.notes ?? "");
+  const [saving, setSaving]         = useState(false);
+  const [err, setErr]               = useState("");
+  const qrPreview = buildQrValue(row.gauge_type_id, gaugeId);
+  const aColor = row.area_type === "pre-assy" ? "#4f46e5" : "#0891b2";
+
+  const save = async () => {
+    if (!gaugeId.trim()) { setErr("Gauge ID tidak boleh kosong."); return; }
+    setSaving(true); setErr("");
+    try {
+      await onSave(row.id, gaugeId.trim().toUpperCase(), displayName.trim(), notes.trim());
+      onClose();
+    } catch (e: any) {
+      setErr(e.message ?? "Gagal menyimpan.");
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <ModalShell color={aColor} title="✏️ Edit Gauge QR" onClose={onClose}>
+      <div style={{ padding:20, display:"flex", flexDirection:"column", gap:14 }}>
+        <p style={{ fontSize:12, fontWeight:700, color:"#475569", textTransform:"uppercase", letterSpacing:".04em", margin:"0 0 2px" }}>Tipe Gauge</p>
+        <p style={{ fontSize:13, fontWeight:600, color:"#1e293b", margin:0, background:"#f8fafc", padding:"8px 12px", borderRadius:7, border:"1px solid #e2e8f0" }}>
+          {row.gauge_type_name} — {row.area_type === "pre-assy" ? "Pre-Assembly" : "Final-Assembly"}
+        </p>
+        <p style={{ fontSize:12, fontWeight:700, color:"#475569", textTransform:"uppercase", letterSpacing:".04em", margin:"0 0 2px" }}>Gauge ID</p>
+        <input value={gaugeId} onChange={e => setGaugeId(e.target.value.toUpperCase().replace(/\s+/g, ""))}
+          style={{ width:"100%", padding:"10px 12px", border:"2px solid #e2e8f0", borderRadius:8, fontSize:13, fontFamily:"monospace", fontWeight:600, color:"#1e293b", outline:"none", boxSizing:"border-box" }} />
+        <p style={{ fontSize:11, color:"#64748b", margin:"2px 0 0" }}>QR Value: <code style={{ background:"#ede9fe", color:"#3730a3", padding:"2px 6px", borderRadius:4 }}>{qrPreview}</code></p>
+        <p style={{ fontSize:12, fontWeight:700, color:"#475569", textTransform:"uppercase", letterSpacing:".04em", margin:"0 0 2px" }}>Display Name</p>
+        <input value={displayName} onChange={e => setDisplayName(e.target.value)}
+          style={{ width:"100%", padding:"10px 12px", border:"2px solid #e2e8f0", borderRadius:8, fontSize:13, color:"#1e293b", outline:"none", boxSizing:"border-box" }} />
+        <p style={{ fontSize:12, fontWeight:700, color:"#475569", textTransform:"uppercase", letterSpacing:".04em", margin:"0 0 2px" }}>Catatan <span style={{ fontWeight:400, textTransform:"none", fontSize:11 }}>(opsional)</span></p>
+        <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} placeholder="Lokasi, nomor register, dll."
+          style={{ width:"100%", padding:"10px 12px", border:"2px solid #e2e8f0", borderRadius:8, fontSize:13, resize:"vertical", outline:"none", fontFamily:"inherit", boxSizing:"border-box" }} />
+        {err && <p style={{ fontSize:12, color:"#dc2626", fontWeight:600, margin:0, background:"#fef2f2", padding:"8px 12px", borderRadius:7 }}>⚠ {err}</p>}
+        <ModalFooter onClose={onClose} onSave={save} saving={saving} saveLabel="💾 Simpan" />
+      </div>
+    </ModalShell>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AddGaugeModal
+// ─────────────────────────────────────────────────────────────────────────────
+function AddGaugeModal({ areaType, existingRows, onSave, onClose }: {
+  areaType: "pre-assy" | "final-assy";
+  existingRows: GaugeQRRow[];
+  onSave: (row: any) => Promise<void>;
+  onClose: () => void;
+}) {
+  const gaugeList = getGaugeList(areaType);
+  const [typeIdx, setTypeIdx]       = useState(0);
+  const [saving, setSaving]         = useState(false);
+  const [err, setErr]               = useState("");
+  const aColor = areaType === "pre-assy" ? "#4f46e5" : "#0891b2";
+
+  const calcSeq = (tIdx: number) =>
+    existingRows.filter(r => r.gauge_type_id === gaugeList[tIdx].dciItemId && r.area_type === areaType).length + 1;
+
+  const sel = gaugeList[typeIdx];
+  const [gaugeId, setGaugeId]         = useState(() => buildDefaultGaugeId(areaType, sel.slug, calcSeq(0)));
+  const [displayName, setDisplayName] = useState(() => `${sel.name} ${areaType === "pre-assy" ? "PA" : "FA"} #${calcSeq(0)}`);
+  const [notes, setNotes]             = useState("");
+
+  useEffect(() => {
+    const seq = calcSeq(typeIdx);
+    const t   = gaugeList[typeIdx];
+    setGaugeId(buildDefaultGaugeId(areaType, t.slug, seq));
+    setDisplayName(`${t.name} ${areaType === "pre-assy" ? "PA" : "FA"} #${seq}`);
+  }, [typeIdx]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const qrPreview = buildQrValue(sel.dciItemId, gaugeId);
+  const seq       = calcSeq(typeIdx);
+
+  const save = async () => {
+    if (!gaugeId.trim()) { setErr("Gauge ID tidak boleh kosong."); return; }
+    setSaving(true); setErr("");
+    try {
+      await onSave({
+        gauge_type_id:   sel.dciItemId,
+        gauge_type_slug: sel.slug,
+        gauge_type_name: sel.name,
+        area_type:       areaType,
+        gauge_id:        gaugeId.trim().toUpperCase(),
+        qr_value:        qrPreview,
+        display_name:    displayName.trim() || gaugeId.trim().toUpperCase(),
+        seq_number:      seq,
+        notes:           notes.trim() || null,
+      });
+      onClose();
+    } catch (e: any) {
+      setErr(e.message ?? "Gagal menyimpan.");
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <ModalShell color={aColor} title={`➕ Tambah Gauge QR — ${areaType === "pre-assy" ? "Pre-Assembly" : "Final-Assembly"}`} onClose={onClose}>
+      <div style={{ padding:20, display:"flex", flexDirection:"column", gap:14 }}>
+        <p style={{ fontSize:12, fontWeight:700, color:"#475569", textTransform:"uppercase", letterSpacing:".04em", margin:"0 0 4px" }}>Tipe Gauge / Item Check</p>
+        <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+          {gaugeList.map((t, i) => (
+            <button key={t.slug} onClick={() => setTypeIdx(i)}
+              style={{ padding:"5px 10px", border:`1.5px solid ${typeIdx === i ? aColor : "#e2e8f0"}`, borderRadius:7,
+                background: typeIdx === i ? (areaType === "pre-assy" ? "#ede9fe" : "#e0f2fe") : "#f8fafc",
+                fontSize:11, fontWeight: typeIdx === i ? 700 : 600, cursor:"pointer",
+                color: typeIdx === i ? aColor : "#475569", transition:"all .12s" }}>
+              {t.name}
+            </button>
+          ))}
+        </div>
+        <p style={{ fontSize:12, fontWeight:700, color:"#475569", textTransform:"uppercase", letterSpacing:".04em", margin:"0 0 2px" }}>Gauge ID <span style={{ fontWeight:400, textTransform:"none", fontSize:11 }}>(bisa diedit)</span></p>
+        <input value={gaugeId} onChange={e => setGaugeId(e.target.value.toUpperCase().replace(/\s+/g, ""))}
+          style={{ width:"100%", padding:"10px 12px", border:"2px solid #e2e8f0", borderRadius:8, fontSize:13, fontFamily:"monospace", fontWeight:600, color:"#1e293b", outline:"none", boxSizing:"border-box" }} />
+        <p style={{ fontSize:11, color:"#64748b", margin:"2px 0 0" }}>QR Value: <code style={{ background:"#ede9fe", color:"#3730a3", padding:"2px 6px", borderRadius:4, fontSize:11 }}>{qrPreview}</code></p>
+        <p style={{ fontSize:12, fontWeight:700, color:"#475569", textTransform:"uppercase", letterSpacing:".04em", margin:"0 0 2px" }}>Display Name</p>
+        <input value={displayName} onChange={e => setDisplayName(e.target.value)}
+          style={{ width:"100%", padding:"10px 12px", border:"2px solid #e2e8f0", borderRadius:8, fontSize:13, color:"#1e293b", outline:"none", boxSizing:"border-box" }} />
+        <p style={{ fontSize:12, fontWeight:700, color:"#475569", textTransform:"uppercase", letterSpacing:".04em", margin:"0 0 2px" }}>Catatan <span style={{ fontWeight:400, textTransform:"none", fontSize:11 }}>(opsional)</span></p>
+        <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} placeholder="Lokasi fisik, nomor register, dll."
+          style={{ width:"100%", padding:"10px 12px", border:"2px solid #e2e8f0", borderRadius:8, fontSize:13, resize:"vertical", outline:"none", fontFamily:"inherit", boxSizing:"border-box" }} />
+        {err && <p style={{ fontSize:12, color:"#dc2626", fontWeight:600, margin:0, background:"#fef2f2", padding:"8px 12px", borderRadius:7 }}>⚠ {err}</p>}
+        <ModalFooter onClose={onClose} onSave={save} saving={saving} saveLabel="➕ Tambah" />
+      </div>
+    </ModalShell>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AddAreaModal
+// ─────────────────────────────────────────────────────────────────────────────
+function AddAreaModal({ areaType, categories, onSave, onClose }: {
+  areaType: "pre-assy" | "final-assy";
+  categories: Category[];
+  onSave: (data: { categoryId: number; areaName: string; areaCode: string; displayName: string; notes: string }) => Promise<void>;
+  onClose: () => void;
+}) {
+  const aColor = areaType === "pre-assy" ? "#4f46e5" : "#0891b2";
+  const [categoryId, setCategoryId]   = useState(categories[0]?.id ?? 0);
+  const [areaName, setAreaName]       = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [notes, setNotes]             = useState("");
+  const [saving, setSaving]           = useState(false);
+  const [err, setErr]                 = useState("");
+
+  // Auto-generate area_code from areaName
+  const buildAreaCode = (name: string, catCode: string) =>
+    `${catCode}-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "")}`;
+
+  const selectedCat = categories.find(c => c.id === categoryId);
+  const areaCode    = buildAreaCode(areaName, selectedCat?.category_code ?? "area");
+  // QR value for area = plain area name (consistent with existing AreaQRCard)
+  const qrPreview   = areaName.trim() || "—";
+
+  const save = async () => {
+    if (!areaName.trim()) { setErr("Nama area tidak boleh kosong."); return; }
+    if (!categoryId) { setErr("Pilih kategori terlebih dahulu."); return; }
+    setSaving(true); setErr("");
+    try {
+      await onSave({
+        categoryId,
+        areaName:    areaName.trim(),
+        areaCode:    areaCode,
+        displayName: (displayName.trim() || areaName.trim()),
+        notes:       notes.trim(),
+      });
+      onClose();
+    } catch (e: any) {
+      setErr(e.message ?? "Gagal menyimpan.");
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <ModalShell color={aColor} title={`➕ Tambah Area QR — ${areaType === "pre-assy" ? "Pre-Assembly" : "Final-Assembly"}`} onClose={onClose}>
+      <div style={{ padding:20, display:"flex", flexDirection:"column", gap:14 }}>
+        <p style={{ fontSize:12, fontWeight:700, color:"#475569", textTransform:"uppercase", letterSpacing:".04em", margin:"0 0 4px" }}>Kategori Checklist</p>
+        <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+          {categories.map(cat => (
+            <button key={cat.id} onClick={() => setCategoryId(cat.id)}
+              style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 14px",
+                border:`1.5px solid ${categoryId === cat.id ? aColor : "#e2e8f0"}`,
+                borderRadius:8, background: categoryId === cat.id ? (areaType === "pre-assy" ? "#ede9fe" : "#e0f2fe") : "#f8fafc",
+                fontSize:12, fontWeight: categoryId === cat.id ? 700 : 500,
+                color: categoryId === cat.id ? aColor : "#475569", cursor:"pointer", textAlign:"left" }}>
+              <span>{cat.table_type === "inspector" ? "🔍" : "👔"}</span>
+              <span>{cat.category_name}</span>
+            </button>
+          ))}
+        </div>
+        <p style={{ fontSize:12, fontWeight:700, color:"#475569", textTransform:"uppercase", letterSpacing:".04em", margin:"0 0 2px" }}>Nama Area <span style={{ fontWeight:400, textTransform:"none", fontSize:11 }}>(isi QR Code)</span></p>
+        <input value={areaName} onChange={e => setAreaName(e.target.value)}
+          placeholder="Contoh: Genba A - Toyota"
+          style={{ width:"100%", padding:"10px 12px", border:"2px solid #e2e8f0", borderRadius:8, fontSize:13, color:"#1e293b", outline:"none", boxSizing:"border-box" }} />
+        <p style={{ fontSize:11, color:"#64748b", margin:"2px 0 0" }}>
+          QR Value: <code style={{ background:"#dbeafe", color:"#1e40af", padding:"2px 6px", borderRadius:4, fontSize:11 }}>{qrPreview}</code>
+        </p>
+        <p style={{ fontSize:11, color:"#94a3b8", margin:"0" }}>
+          Area Code: <code style={{ fontSize:10 }}>{areaCode || "—"}</code>
+        </p>
+        <p style={{ fontSize:12, fontWeight:700, color:"#475569", textTransform:"uppercase", letterSpacing:".04em", margin:"0 0 2px" }}>Display Name <span style={{ fontWeight:400, textTransform:"none", fontSize:11 }}>(opsional, default = Nama Area)</span></p>
+        <input value={displayName} onChange={e => setDisplayName(e.target.value)}
+          placeholder={areaName || "Sama dengan Nama Area"}
+          style={{ width:"100%", padding:"10px 12px", border:"2px solid #e2e8f0", borderRadius:8, fontSize:13, color:"#1e293b", outline:"none", boxSizing:"border-box" }} />
+        <p style={{ fontSize:12, fontWeight:700, color:"#475569", textTransform:"uppercase", letterSpacing:".04em", margin:"0 0 2px" }}>Catatan <span style={{ fontWeight:400, textTransform:"none", fontSize:11 }}>(opsional)</span></p>
+        <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2}
+          placeholder="Lokasi fisik, lantai, dll."
+          style={{ width:"100%", padding:"10px 12px", border:"2px solid #e2e8f0", borderRadius:8, fontSize:13, resize:"vertical", outline:"none", fontFamily:"inherit", boxSizing:"border-box" }} />
+        {err && <p style={{ fontSize:12, color:"#dc2626", fontWeight:600, margin:0, background:"#fef2f2", padding:"8px 12px", borderRadius:7 }}>⚠ {err}</p>}
+        <ModalFooter onClose={onClose} onSave={save} saving={saving} saveLabel="➕ Tambah Area" />
+      </div>
+    </ModalShell>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Static fallback data
 // ─────────────────────────────────────────────────────────────────────────────
 const FALLBACK_CATEGORIES: Category[] = [
@@ -379,9 +643,14 @@ export default function QRGeneratorPage() {
   const [gaugeSearch, setGaugeSearch]     = useState("");
   const [gaugeTypes, setGaugeTypes]       = useState<any[]>([]);
 
+  // Add modal state
+  const [showAddGauge, setShowAddGauge]   = useState(false);
+  const [showAddArea, setShowAddArea]     = useState(false);
+  const [addSuccess, setAddSuccess]       = useState<string | null>(null);
+
   useEffect(() => {
     if (mainTab === "gauge") {
-      authFetch(`/api/admin/gauge-types?areaType=${gaugeAreaTab}`).then(r => r.json()).then(d => { if (d.success) setGaugeTypes(d.data); }).catch(console.error);
+      authFetch(`/e-checksheet-qa/api/admin/gauge-types?areaType=${gaugeAreaTab}`).then(r => r.json()).then(d => { if (d.success) setGaugeTypes(d.data); }).catch(console.error);
     }
   }, [mainTab, gaugeAreaTab]);
 
@@ -395,7 +664,7 @@ export default function QRGeneratorPage() {
     const load = async () => {
       setIsLoading(true);
       try {
-        const res = await authFetch(`/api/admin/categories?areaType=${areaType}`);
+        const res = await authFetch(`/e-checksheet-qa/api/admin/categories?areaType=${areaType}`);
         if (!res.ok) throw new Error();
         const d = await res.json();
         const cats = d.success && d.data?.length ? d.data : FALLBACK_CATEGORIES.filter(c => c.area_type === areaType);
@@ -420,7 +689,7 @@ export default function QRGeneratorPage() {
   const loadAreas = useCallback(async (catId: number) => {
     setAreasLoading(true); setIsGenerated(false);
     try {
-      const res = await authFetch(`/api/admin/areas?categoryId=${catId}`);
+      const res = await authFetch(`/e-checksheet-qa/api/admin/areas?categoryId=${catId}`);
       if (!res.ok) throw new Error();
       const d = await res.json();
       setAreas(d.success && d.data?.length ? d.data : FALLBACK_AREAS.filter(a => a.category_id === catId));
@@ -434,7 +703,7 @@ export default function QRGeneratorPage() {
   const loadGauge = useCallback(async (at: "pre-assy" | "final-assy") => {
     setGaugeLoading(true); setGaugeError(null);
     try {
-      const res = await authFetch(`/api/admin/gauge-qr-codes?areaType=${at}`);
+      const res = await authFetch(`/e-checksheet-qa/api/admin/gauge-qr-codes?areaType=${at}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const d = await res.json();
       setGaugeRows(d.data ?? []);
@@ -453,9 +722,65 @@ export default function QRGeneratorPage() {
   });
 
   const handleDelete = async (id: number) => {
-    const res = await authFetch(`/api/admin/gauge-qr-codes?id=${id}`, { method: "DELETE" });
+    const res = await authFetch(`/e-checksheet-qa/api/admin/gauge-qr-codes?id=${id}`, { method: "DELETE" });
     if (!res.ok) { alert("Gagal menghapus."); return; }
     setGaugeRows(prev => prev.filter(r => r.id !== id));
+  };
+  const handleAddGaugeSave = async (row: any) => {
+    const res = await authFetch("/e-checksheet-qa/api/admin/gauge-qr-codes", {
+      method: "POST",
+      body: JSON.stringify({
+        gaugeTypeId:   row.gauge_type_id,
+        gaugeTypeSlug: row.gauge_type_slug,
+        gaugeTypeName: row.gauge_type_name,
+        areaType:      row.area_type,
+        gaugeId:       row.gauge_id,
+        qrValue:       row.qr_value,
+        displayName:   row.display_name,
+        seqNumber:     row.seq_number,
+        notes:         row.notes,
+      }),
+    });
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.error ?? "Gagal menambah gauge.");
+    setAddSuccess(`✅ Gauge "${row.gauge_id}" berhasil ditambahkan.`);
+    setTimeout(() => setAddSuccess(null), 4000);
+    await loadGauge(gaugeAreaTab);
+  };
+
+  const handleEditGaugeSave = async (id: number, gaugeId: string, displayName: string, notes: string) => {
+    const res = await authFetch("/e-checksheet-qa/api/admin/gauge-qr-codes", {
+      method: "PATCH",
+      body: JSON.stringify({ id, gaugeId, displayName, notes }),
+    });
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.error ?? "Gagal memperbarui gauge.");
+    setGaugeRows(prev => prev.map(r => r.id === id ? { ...r, gauge_id: gaugeId, display_name: displayName, notes, qr_value: d.data?.qr_value ?? r.qr_value } : r));
+    setEditingRow(null);
+  };
+
+  const handleAddAreaSave = async (data: { categoryId: number; areaName: string; areaCode: string; displayName: string; notes: string }) => {
+    const res = await authFetch("/e-checksheet-qa/api/admin/areas", {
+      method: "POST",
+      body: JSON.stringify({
+        categoryId:  data.categoryId,
+        areaName:    data.areaName,
+        areaCode:    data.areaCode,
+        displayName: data.displayName,
+        notes:       data.notes || null,
+        isActive:    true,
+      }),
+    });
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.error ?? "Gagal menambah area.");
+    setAddSuccess(`✅ Area "${data.areaName}" berhasil ditambahkan.`);
+    setTimeout(() => setAddSuccess(null), 4000);
+    // Reload areas for current category
+    if (d.data?.category_id) {
+      const r2 = await authFetch(`/e-checksheet-qa/api/admin/areas?categoryId=${data.categoryId}`);
+      const d2 = await r2.json();
+      if (d2.success) setAreas(d2.data);
+    }
   };
 
   if (authLoading || !isInitialized || isLoading) return (
@@ -583,6 +908,14 @@ export default function QRGeneratorPage() {
               </div>
             </div>
 
+            <div style={{ display:"flex", justifyContent:"flex-end", marginBottom:8 }}>
+              <button
+                onClick={() => setShowAddArea(true)}
+                style={{ padding:"9px 16px", background: areaType === "pre-assy" ? "#4f46e5" : "#0891b2", color:"white", border:"none", borderRadius:9, fontSize:13, fontWeight:700, cursor:"pointer", display:"flex", alignItems:"center", gap:6 }}>
+                ➕ Tambah Area Baru
+              </button>
+            </div>
+
             <div>
               {isGenerated ? (
                 <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
@@ -645,6 +978,13 @@ export default function QRGeneratorPage() {
               </select>
             </div>
           </div>
+          <div style={{ display:"flex", justifyContent:"flex-end", marginBottom:4 }}>
+            <button
+              onClick={() => setShowAddGauge(true)}
+              style={{ padding:"10px 18px", background:gColor, color:"white", border:"none", borderRadius:10, fontSize:13, fontWeight:700, cursor:"pointer", display:"flex", alignItems:"center", gap:6, boxShadow:`0 2px 8px ${gColor}55` }}>
+              ➕ Tambah Gauge QR
+            </button>
+          </div>
           {gaugeError && <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderLeft: "4px solid #f59e0b", borderRadius: 8, padding: "12px 16px", marginBottom: 16, fontSize: 13, color: "#92400e" }}>⚠️ {gaugeError}</div>}
           {gaugeLoading
             ? <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 14, padding: 48, background: "white", borderRadius: 12 }}>
@@ -662,6 +1002,36 @@ export default function QRGeneratorPage() {
                 </div>
               </>}
         </>
+      )}
+
+      {/* ── Modals ─────────────────────────────────────────────── */}
+      {showAddGauge && (
+        <AddGaugeModal
+          areaType={gaugeAreaTab}
+          existingRows={gaugeRows}
+          onSave={handleAddGaugeSave}
+          onClose={() => setShowAddGauge(false)}
+        />
+      )}
+      {showAddArea && (
+        <AddAreaModal
+          areaType={areaType}
+          categories={categories.filter(c => c.area_type === areaType)}
+          onSave={handleAddAreaSave}
+          onClose={() => setShowAddArea(false)}
+        />
+      )}
+      {editingRow && (
+        <EditGaugeModal
+          row={editingRow}
+          onSave={handleEditGaugeSave}
+          onClose={() => setEditingRow(null)}
+        />
+      )}
+      {addSuccess && (
+        <div style={{ position:"fixed", bottom:24, left:"50%", transform:"translateX(-50%)", background:"#166534", color:"white", padding:"12px 24px", borderRadius:12, fontSize:13, fontWeight:600, boxShadow:"0 4px 16px rgba(0,0,0,.2)", zIndex:9500 }}>
+          {addSuccess}
+        </div>
       )}
 
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>

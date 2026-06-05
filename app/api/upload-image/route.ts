@@ -60,7 +60,7 @@ export async function POST(request: NextRequest) {
     // [FIX] Gunakan /api/uploads/... agar file bisa diakses di production.
     // Static path /uploads/... hanya bisa diakses di development atau jika
     // file sudah ada sejak build time.
-    const url = `/api/uploads/checksheet/${filename}`;
+    const url = `/e-checksheet-qa/api/uploads/checksheet/${filename}`;
 
     console.log(
       `✅ [Upload] ${filename} | ${(file.size / 1024).toFixed(0)} KB | ${file.type}`

@@ -83,7 +83,7 @@ function AreaFilter({
     if (!categoryCode) return;
     let mounted = true;
     setIsFetching(true);
-    fetch(`/api/areas/get-by-category?categoryCode=${encodeURIComponent(categoryCode)}`)
+    fetch(`/e-checksheet-qa/api/areas/get-by-category?categoryCode=${encodeURIComponent(categoryCode)}`)
       .then(r => r.json())
       .then(data => {
         if (!mounted) return;
@@ -266,7 +266,7 @@ export default function FinalAssyStatusPage() {
     setGlResults({});
     setInspResults({});
     setIsFetchingConveyors(true);
-    fetch("/api/conveyors")
+    fetch("/e-checksheet-qa/api/conveyors")
       .then(r => r.json())
       .then(data => {
         let conveyors: string[] = [];
@@ -288,7 +288,7 @@ export default function FinalAssyStatusPage() {
     setSelectedPattern("");
     setPatternOptions([]);
     setIsFetchingPatterns(true);
-    fetch(`/api/conveyors?conveyor=${encodeURIComponent(selectedConveyor)}`)
+    fetch(`/e-checksheet-qa/api/conveyors?conveyor=${encodeURIComponent(selectedConveyor)}`)
       .then(r => r.json())
       .then(data => {
         if (data.success && Array.isArray(data.patterns)) {
@@ -311,7 +311,7 @@ export default function FinalAssyStatusPage() {
       "9-A":"13:00 - 14:00","9-B":"01:00 - 02:00","10-A":"14:00 - 15:00","10-B":"02:00 - 03:00",
       "11-A":"Setiap Hari Senin","11-B":"Setiap Hari Senin","12-A":"Setiap Hari Senin","12-B":"Setiap Hari Senin",
     };
-    fetch("/api/final-assy/get-checklist-items?type=group-leader")
+    fetch("/e-checksheet-qa/api/final-assy/get-checklist-items?type=group-leader")
       .then(r => r.json())
       .then(data => {
         if (!data.success || !Array.isArray(data.data)) return;
@@ -374,7 +374,7 @@ export default function FinalAssyStatusPage() {
       const patternP    = pattern ? `&pattern=${encodeURIComponent(pattern)}` : "";
       const specificP   = (viewAs === "inspector" && selectedSpecificArea)
         ? `&specificArea=${encodeURIComponent(selectedSpecificArea)}` : "";
-      const base = `/api/final-assy`;
+      const base = `/e-checksheet-qa/api/final-assy`;
       if (viewAs === "group-leader") {
         const [rRes, sRes] = await Promise.all([
           fetch(`${base}/get-results?userId=${user.id}&categoryCode=final-assy-gl&month=${monthKey}&role=${user.role}${areaP}${conveyorP}`),

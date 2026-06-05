@@ -87,7 +87,7 @@ export default function AdminQRCodesPage() {
   const loadCategories = useCallback(async () => {
     try {
       setIsLoading(true);
-      const response = await fetch("/api/dashboard/get-categories?includeAreas=true");
+      const response = await fetch("/e-checksheet-qa/api/dashboard/get-categories?includeAreas=true");
       
       if (!response.ok) {
         throw new Error("Failed to fetch categories");
@@ -119,7 +119,7 @@ export default function AdminQRCodesPage() {
   // ===== LOAD SAVED QR CODES =====
   const loadSavedQRCodes = useCallback(async () => {
     try {
-      const response = await fetch("/api/admin/qr-codes");
+      const response = await fetch("/e-checksheet-qa/api/admin/qr-codes");
       if (response.ok) {
         const data = await response.json();
         if (data.success) {
@@ -209,7 +209,7 @@ export default function AdminQRCodesPage() {
     setError(null);
 
     try {
-      const response = await fetch("/api/admin/qr-codes", {
+      const response = await fetch("/e-checksheet-qa/api/admin/qr-codes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -249,7 +249,7 @@ export default function AdminQRCodesPage() {
     if (!confirm("Yakin ingin menghapus QR Code ini?")) return;
     
     try {
-      const response = await fetch(`/api/admin/qr-codes?id=${qrId}`, {
+      const response = await fetch(`/e-checksheet-qa/api/admin/qr-codes?id=${qrId}`, {
         method: "DELETE"
       });
 

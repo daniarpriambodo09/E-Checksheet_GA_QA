@@ -277,7 +277,7 @@ export function GaugeScanModal({ isOpen, onClose, onSaved, dateKey, shift, userI
       const authToken = getAuthToken();
       // ✅ Tidak kirim areaCode — tampilkan semua gauge yang sudah dicek
       const params = new URLSearchParams({ dateKey, shift });
-      const res = await fetch(`/api/gauges/scanned-history?${params}`, {
+      const res = await fetch(`/e-checksheet-qa/api/gauges/scanned-history?${params}`, {
         headers: { Authorization: authToken || "", "X-Session-Token": authToken || "" },
       });
       const data = await res.json();
@@ -294,7 +294,7 @@ export function GaugeScanModal({ isOpen, onClose, onSaved, dateKey, shift, userI
     setIsFetchingCheckpoints(true);
     try {
       const authToken = getAuthToken();
-      const res = await fetch(`/api/gauges/checkpoints?gaugeType=${encodeURIComponent(gaugeType)}`, {
+      const res = await fetch(`/e-checksheet-qa/api/gauges/checkpoints?gaugeType=${encodeURIComponent(gaugeType)}`, {
         headers: { Authorization: authToken || "", "X-Session-Token": authToken || "" },
       });
       const data = await res.json();
@@ -321,7 +321,7 @@ export function GaugeScanModal({ isOpen, onClose, onSaved, dateKey, shift, userI
     // ✅ Return true jika gauge sudah pernah dichecklist
     try {
       const authToken = getAuthToken();
-      const res = await fetch(`/api/gauges/checkpoints/get?gaugeId=${gaugeId}&dateKey=${dateKey}&shift=${shift}`, {
+      const res = await fetch(`/e-checksheet-qa/api/gauges/checkpoints/get?gaugeId=${gaugeId}&dateKey=${dateKey}&shift=${shift}`, {
         headers: { Authorization: authToken || "", "X-Session-Token": authToken || "" },
       });
       const data = await res.json();
@@ -369,7 +369,7 @@ export function GaugeScanModal({ isOpen, onClose, onSaved, dateKey, shift, userI
       const authToken = getAuthToken();
 
       // 1. Fetch gauge data
-      const gaugeRes = await fetch(`/api/gauges/get-by-code?gaugeCode=${encodeURIComponent(parsed.code)}`, {
+      const gaugeRes = await fetch(`/e-checksheet-qa/api/gauges/get-by-code?gaugeCode=${encodeURIComponent(parsed.code)}`, {
         headers: { Authorization: authToken || "", "X-Session-Token": authToken || "" },
       });
       const gaugeData = await gaugeRes.json();
@@ -392,7 +392,7 @@ export function GaugeScanModal({ isOpen, onClose, onSaved, dateKey, shift, userI
 
       // 4. Fetch inspection
       try {
-        const inspRes = await fetch(`/api/gauges/get-inspection?gaugeId=${gaugeData.gauge.id}&dateKey=${dateKey}&shift=${shift}`, {
+        const inspRes = await fetch(`/e-checksheet-qa/api/gauges/get-inspection?gaugeId=${gaugeData.gauge.id}&dateKey=${dateKey}&shift=${shift}`, {
           headers: { Authorization: authToken || "", "X-Session-Token": authToken || "" },
         });
         const inspData = await inspRes.json();
@@ -438,7 +438,7 @@ export function GaugeScanModal({ isOpen, onClose, onSaved, dateKey, shift, userI
         notes: checkpointNotes[cp.id] || "",
       }));
 
-      const response = await fetch("/api/gauges/checkpoints/save", {
+      const response = await fetch("/e-checksheet-qa/api/gauges/checkpoints/save", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: authToken || "", "X-Session-Token": authToken || "" },
         body: JSON.stringify({ gaugeId: gauge.id, gaugeType: gauge.gauge_type, userId, nik, dateKey, shift, checkpointResults: resultsToSave }),
@@ -468,7 +468,7 @@ export function GaugeScanModal({ isOpen, onClose, onSaved, dateKey, shift, userI
     setIsLoading(true);
     try {
       const authToken = getAuthToken();
-      const gaugeRes = await fetch(`/api/gauges/get-by-gauge-id?gaugeId=${gaugeId}`, {
+      const gaugeRes = await fetch(`/e-checksheet-qa/api/gauges/get-by-gauge-id?gaugeId=${gaugeId}`, {
         headers: { Authorization: authToken || "", "X-Session-Token": authToken || "" },
       });
       const gaugeData = await gaugeRes.json();

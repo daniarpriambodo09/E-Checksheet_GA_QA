@@ -134,7 +134,7 @@ async function resolveAreaCode(areaName: string, categoryCode: string): Promise<
 
   // Online: fetch → saveCache
   try {
-    const res  = await fetch(`/api/admin/areas?categoryCode=${encodeURIComponent(categoryCode)}`);
+    const res  = await fetch(`/e-checksheet-qa/api/admin/areas?categoryCode=${encodeURIComponent(categoryCode)}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     if (!data.success || !Array.isArray(data.data)) throw new Error("invalid response");
@@ -205,7 +205,7 @@ export default function HomePage() {
   useEffect(() => {
     const load = async () => {
       try {
-        const res  = await fetch("/api/admin/categories");
+        const res  = await fetch("/e-checksheet-qa/api/admin/categories");
         const data = await res.json();
         if (data.success && Array.isArray(data.data)) setCategories(data.data);
       } catch (e) { console.error("categories fetch:", e); }
@@ -217,7 +217,7 @@ export default function HomePage() {
   // Preload conveyors ke cache saat online — agar tersedia saat pertama kali offline
   useEffect(() => {
     if (!navigator.onLine) return;
-    fetch("/api/conveyors")
+    fetch("/e-checksheet-qa/api/conveyors")
       .then(r => r.json())
       .then(data => {
         if (data.success && Array.isArray(data.conveyors) && data.conveyors.length > 0)
@@ -229,7 +229,7 @@ export default function HomePage() {
   // Preload areas ke cache saat online — agar resolveAreaCode tetap bekerja saat offline
   useEffect(() => {
     if (!navigator.onLine) return;
-    fetch("/api/admin/areas")
+    fetch("/e-checksheet-qa/api/admin/areas")
       .then(r => r.json())
       .then(data => {
         if (data.success && Array.isArray(data.data) && data.data.length > 0)

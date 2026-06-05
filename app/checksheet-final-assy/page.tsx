@@ -111,8 +111,8 @@ async function resolveAreaCode(areaName: string, categoryCode = "final-assy-insp
   // Online: fetch → simpan ke cache
   try {
     const url = categoryCode
-      ? `/api/admin/areas?categoryCode=${encodeURIComponent(categoryCode)}`
-      : `/api/admin/areas`;
+      ? `/e-checksheet-qa/api/admin/areas?categoryCode=${encodeURIComponent(categoryCode)}`
+      : `/e-checksheet-qa/api/admin/areas`;
     const res  = await fetch(url);
     if (!res.ok) return null;
     const data = await res.json();
@@ -553,7 +553,7 @@ export default function ChecksheetFinalAssyPage() {
 
       try {
         const res = await safeFetch(
-          `/api/final-assy/get-checklist-items?type=${checklistType}&areaCode=${effectiveAreaCode}`
+          `/e-checksheet-qa/api/final-assy/get-checklist-items?type=${checklistType}&areaCode=${effectiveAreaCode}`
         );
         if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || `HTTP ${res.status}`); }
         const data = await res.json();
@@ -701,7 +701,7 @@ export default function ChecksheetFinalAssyPage() {
       const spParam      = (checklistType === "inspector" && selectedSpecificArea)
         ? `&specificArea=${encodeURIComponent(selectedSpecificArea)}` : "";
       const url =
-        `/api/final-assy/get-results?userId=${userId}` +
+        `/e-checksheet-qa/api/final-assy/get-results?userId=${userId}` +
         `&categoryCode=${categoryCode}&month=${dateKey.slice(0, 7)}` +
         `&role=${userRole}&areaCode=${encodeURIComponent(effectiveAreaCode)}` +
         `&conveyor=${encodeURIComponent(locationKey)}&shift=${encodeURIComponent(shift)}` +
@@ -878,7 +878,7 @@ export default function ChecksheetFinalAssyPage() {
     if (!gId) { doSet(); return; }
     setIsCheckingDuplicate(itemId);
     try {
-      const res  = await safeFetch("/api/final-assy/check-duplicate", {
+      const res  = await safeFetch("/e-checksheet-qa/api/final-assy/check-duplicate", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId, categoryCode: "final-assy-inspector", itemId, gaugeId: gId, dateKey: getLocalDateKey(selectedDate), shift, areaCode: effectiveAreaCode, carline: conveyor, line: null, specificArea: selectedSpecificArea }),
       });
@@ -930,7 +930,7 @@ export default function ChecksheetFinalAssyPage() {
     const ngPhotos = isNg ? (r.ngPhotos || []) : null;
 
     try {
-      await saveChecklistOffline("/api/final-assy/save-result", {
+      await saveChecklistOffline("/e-checksheet-qa/api/final-assy/save-result", {
         userId, categoryCode, itemId, dateKey, shift, status: r.status,
         ngDescription, ngDepartment: isNg ? "QA" : null, ngPhotos,
         areaCode: effectiveAreaCode, conveyor: conveyor || null, carline: null, line: null,
@@ -1061,7 +1061,7 @@ export default function ChecksheetFinalAssyPage() {
 
       // Simpan ke IndexedDB queue (bekerja online maupun offline)
       await Promise.all(preparedItems.map(({ item, status, ngDescription, ngPhotos, submittedAt }) =>
-        saveChecklistOffline("/api/final-assy/save-result", {
+        saveChecklistOffline("/e-checksheet-qa/api/final-assy/save-result", {
           userId, categoryCode, itemId: item.id, dateKey, shift, status,
           ngDescription, ngDepartment: status === "NG" ? "QA" : null, ngPhotos,
           areaCode: effectiveAreaCode, conveyor: conveyor || null, carline: null, line: null,

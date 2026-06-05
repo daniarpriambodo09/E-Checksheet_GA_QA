@@ -306,11 +306,11 @@ export const Sidebar = memo(function Sidebar({ userName = "User", userRole = "Ro
           <div className="logo-section">
             {isExpanded ? (
               <div className="logo-wrapper">
-                <img src="/images/yazaki-logo.jpg" alt="YAZAKI Logo" className="logo-img" />
+                <img src="/e-checksheet-qa/images/yazaki-logo.jpg" alt="YAZAKI Logo" className="logo-img" />
               </div>
             ) : (
               <div className="icon-wrapper">
-                <img src="/images/logo.png" alt="YAZAKI Icon" className="icon-img" />
+                <img src="/e-checksheet-qa/images/logo.png" alt="YAZAKI Icon" className="icon-img" />
               </div>
             )}
           </div>

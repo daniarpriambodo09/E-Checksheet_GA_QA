@@ -86,7 +86,7 @@ export function ConveyorPatternSelector({
           return;
         }
         // Online: fetch → saveCache
-        const res  = await fetch("/api/conveyors");
+        const res  = await fetch("/e-checksheet-qa/api/conveyors");
         const data = await res.json();
         if (data.success && data.conveyors?.length > 0) {
           setConveyors(data.conveyors);

@@ -47,7 +47,7 @@ export function ConveyorOnlySelector({
         return;
       }
       // Online: fetch → saveCache
-      const res = await fetch("/api/conveyors");
+      const res = await fetch("/e-checksheet-qa/api/conveyors");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (data.success && Array.isArray(data.conveyors)) {

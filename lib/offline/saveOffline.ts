@@ -75,10 +75,15 @@ export async function saveChecklistOffline(endpoint: string, payload: any): Prom
     id,
     endpoint,
     payload: normalizedPayload,
-    synced: false,
+    // [FIX] Simpan sebagai Boolean(false) eksplisit, bukan nilai truthy/falsy lainnya.
+    // Beberapa browser menyimpan false sebagai 0 di IndexedDB, menyebabkan
+    // strict filter `item.synced === false` di syncChecklist gagal mendeteksi item.
+    synced: false as boolean,
     createdAt: Date.now(),
   };
 
-  await db.checklists.add(data);
-  console.log(`[saveOffline] ✅ Checklist disimpan offline (id=${id})`);
+  // [FIX] Gunakan put() bukan add() — put() bersifat upsert sehingga tidak
+  // throw ConstraintError jika id sudah ada (race condition retry).
+  await db.checklists.put(data);
+  console.log(`[saveOffline] ✅ Checklist disimpan offline (id=${id}, endpoint=${endpoint})`);
 }
